@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { Globe, Play, Users, Trophy, ArrowRight, Home, Map as MapIcon, Minimize2, Copy, CheckCircle, RotateCcw, User } from 'lucide-react';
+import { Globe, Users, Trophy, ArrowRight, Home, Map as MapIcon, Minimize2, Copy, CheckCircle, RotateCcw, User, Clock } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GOOGLE_MAPS_API_KEY = "AIzaSyClIIqqJnkI-7BviXgT4oB44nBtSF6FkNI"; // Replace with your actual Google Maps API Key
@@ -211,7 +211,7 @@ const GoogleMapCanvas = ({ interactable, actualLocation, guesses, activeGuess, a
 
         if (guesses && guesses.length > 0) {
           guesses.forEach((guess) => {
-            if (!guess) return;
+            if (!guess || guess.lat === null) return; // Skip if they timed out without guessing
             const pos = { lat: guess.lat, lng: guess.lng };
             
             const icon = guess.avatar ? {
@@ -221,7 +221,27 @@ const GoogleMapCanvas = ({ interactable, actualLocation, guesses, activeGuess, a
             } : createPin(guess.color);
 
             markersRef.current.push(new google.maps.Marker({ position: pos, map, icon: icon, title: guess.label }));
-            polylinesRef.current.push(new google.maps.Polyline({ path: [pos, actualPos], geodesic: true, strokeColor: guess.color, strokeOpacity: 0.8, strokeWeight: 3, map }));
+            
+            // Dashed Line to Actual Location
+            const lineSymbol = {
+              path: 'M 0,-1 0,1',
+              strokeOpacity: 1,
+              scale: 3
+            };
+
+            polylinesRef.current.push(new google.maps.Polyline({ 
+              path: [pos, actualPos], 
+              geodesic: true, 
+              strokeColor: guess.color, 
+              strokeOpacity: 0, // Set base to 0 to only show dashes
+              strokeWeight: 3, 
+              icons: [{
+                icon: lineSymbol,
+                offset: '0',
+                repeat: '20px'
+              }],
+              map 
+            }));
             bounds.extend(pos);
           });
         }
@@ -256,11 +276,18 @@ export default function App() {
   const [isGeneratingLocations, setIsGeneratingLocations] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
+  // New settings state
+  const [timeLimit, setTimeLimit] = useState(60); 
+
   const [activeGuess, setActiveGuess] = useState(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // Parse URL for invite code (Cleaned for production Netlify URL)
+  // Timer Ref to hold current guess in case of timeout
+  const activeGuessRef = useRef(null);
+  useEffect(() => { activeGuessRef.current = activeGuess; }, [activeGuess]);
+
+  // Parse URL for invite code
   useEffect(() => {
      const hashStr = window.location.hash.replace('#', '');
      if (hashStr && hashStr.length === 4) {
@@ -288,7 +315,7 @@ export default function App() {
   useEffect(() => {
     if (!user || !roomCode || isSinglePlayer) return;
 
-    const roomRef = doc(db, 'rooms', roomCode); // Root collection for production
+    const roomRef = doc(db, 'rooms', roomCode);
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
@@ -319,7 +346,6 @@ export default function App() {
   // --- ACTIONS ---
 
   const getShareLink = () => {
-    // Perfect clean URL for Netlify production
     return `${window.location.origin}/#${roomCode}`;
   };
 
@@ -361,11 +387,12 @@ export default function App() {
     setIsSinglePlayer(false);
     setErrorMsg('');
     const code = generateRoomCode();
-    const roomRef = doc(db, 'rooms', code); // Using root 'rooms' collection
+    const roomRef = doc(db, 'rooms', code);
     
     try {
       await setDoc(roomRef, {
-        status: 'lobby', hostId: user.uid, settings: { numRounds: 5 },
+        status: 'lobby', hostId: user.uid, 
+        settings: { numRounds: 5, timeLimit }, // Save time limit
         players: { [user.uid]: { name: playerName.trim().substring(0, 15), avatar: getAvatarUrl(user.uid), score: 0, color: getPlayerColor(0, 1) } },
         locations: [], currentRound: 0, guesses: {}
       });
@@ -389,7 +416,7 @@ export default function App() {
     const roomRef = doc(db, 'rooms', code);
     
     try {
-      const snap = await getDoc(roomRef); // Changed to standard getDoc for custom Firebase
+      const snap = await getDoc(roomRef);
       if (!snap.exists()) {
         setErrorMsg('Room not found.');
       } else {
@@ -407,7 +434,7 @@ export default function App() {
   };
 
   const startSinglePlayer = async () => {
-     if (isGeneratingLocations) return;
+     if (isGeneratingLocations || !playerName.trim()) return;
      setIsGeneratingLocations(true);
      setIsSinglePlayer(true);
 
@@ -419,7 +446,8 @@ export default function App() {
       const uid = user ? user.uid : 'solo';
       
       setRoomData({
-         status: 'playing', hostId: uid, settings: { numRounds: 5 },
+         status: 'playing', hostId: uid, 
+         settings: { numRounds: 5, timeLimit }, // Save time limit
          players: { [uid]: { name: playerName.trim().substring(0, 15) || 'Guest', avatar: getAvatarUrl(uid), score: 0, color: '#3b82f6' } },
          locations, currentRound: 0, guesses: {}
       });
@@ -459,22 +487,29 @@ export default function App() {
     }
   };
 
-  const submitGuess = async () => {
-    if (!user || !roomData || !activeGuess) return;
+  const submitGuess = async (guessOverride = null, isTimeout = false) => {
+    const finalGuess = guessOverride || activeGuess;
+    if (!user || !roomData) return;
+    if (!finalGuess && !isTimeout) return; // Prevent manual submit without a guess
+
     const actualLoc = roomData.locations[roomData.currentRound];
-    const distance = calculateDistance(activeGuess.lat, activeGuess.lng, actualLoc.lat, actualLoc.lng);
-    const score = calculateScore(distance);
+    
+    // If they timed out without guessing, set distance to null and score to 0
+    const distance = finalGuess ? calculateDistance(finalGuess.lat, finalGuess.lng, actualLoc.lat, actualLoc.lng) : null;
+    const score = finalGuess ? calculateScore(distance) : 0;
     const uid = isSinglePlayer ? Object.keys(roomData.players)[0] : user.uid;
+
+    const guessData = finalGuess ? { ...finalGuess, distance, score } : { lat: null, lng: null, distance, score, timeout: true };
 
     if (isSinglePlayer) {
       setRoomData(prev => ({
           ...prev, status: 'round_result',
-          guesses: { ...prev.guesses, [prev.currentRound]: { [uid]: { ...activeGuess, distance, score } } },
+          guesses: { ...prev.guesses, [prev.currentRound]: { [uid]: guessData } },
           players: { ...prev.players, [uid]: { ...prev.players[uid], score: prev.players[uid].score + score } }
       }));
     } else {
       await updateDoc(doc(db, 'rooms', roomCode), {
-        [`guesses.${roomData.currentRound}.${uid}`]: { ...activeGuess, distance, score }
+        [`guesses.${roomData.currentRound}.${uid}`]: guessData
       });
     }
     setActiveGuess(null);
@@ -510,11 +545,10 @@ export default function App() {
     setActiveGuess(null);
     setIsMapExpanded(false);
     
-    // Catch history manipulation errors in restricted blob/iframe preview environments
     try {
       window.history.replaceState(null, '', window.location.pathname);
     } catch (e) {
-      console.warn("Could not clear URL hash due to environment restrictions (safe to ignore).");
+      console.warn("Could not clear URL hash due to environment restrictions.");
     }
   };
 
@@ -531,8 +565,22 @@ export default function App() {
           <input 
             type="text" placeholder="Your Nickname" value={playerName}
             onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
-            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-4 mb-6 focus:outline-none focus:border-blue-500 text-white font-bold text-center text-lg md:text-xl"
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-4 mb-4 focus:outline-none focus:border-blue-500 text-white font-bold text-center text-lg md:text-xl"
           />
+
+          <div className="w-full mb-6">
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-2 text-left ml-2">Round Timer</p>
+            <div className="flex justify-between items-center bg-slate-900 border border-slate-700 rounded-xl p-1.5">
+              {[15, 30, 60, 120, 0].map(t => (
+                <button 
+                  key={t} onClick={() => setTimeLimit(t)} 
+                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${timeLimit === t ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                >
+                  {t === 0 ? '∞' : `${t}s`}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="w-full grid grid-cols-2 gap-3 md:gap-4 mb-6">
              <button 
@@ -577,6 +625,7 @@ export default function App() {
     const isHost = roomData.hostId === user?.uid;
     const playersList = Object.values(roomData.players);
     const shareUrl = getShareLink();
+    const timeLimitStr = roomData.settings.timeLimit === 0 ? 'Infinite Time' : `${roomData.settings.timeLimit}s Per Round`;
 
     return (
       <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center py-6 md:py-12 px-4 font-sans">
@@ -584,6 +633,7 @@ export default function App() {
           <div className="flex flex-col items-center mb-8 md:mb-10 border-b border-slate-700 pb-6 md:pb-8">
             <p className="text-slate-400 font-bold tracking-widest uppercase mb-2 text-sm">Room Code</p>
             <h2 className="text-5xl md:text-7xl font-black font-mono tracking-widest text-blue-400 select-all cursor-text mb-6">{roomCode}</h2>
+            <p className="text-emerald-400 font-bold mb-6 flex items-center gap-2 bg-emerald-400/10 px-4 py-2 rounded-full border border-emerald-400/20"><Clock size={16}/> {timeLimitStr}</p>
             
             <div className="w-full flex flex-col md:flex-row gap-2">
                <input type="text" readOnly value={shareUrl} className="flex-1 bg-slate-900 text-slate-400 p-3 md:px-4 rounded-xl border border-slate-700 font-mono text-xs md:text-sm text-center md:text-left" />
@@ -635,6 +685,29 @@ export default function App() {
     const isHost = isSinglePlayer || roomData.hostId === uid;
     const myAvatar = roomData.players[uid]?.avatar;
 
+    // Timer Logic
+    const [timeLeft, setTimeLeft] = useState(roomData.settings.timeLimit || 0);
+    
+    useEffect(() => {
+      if (!roomData || roomData.settings.timeLimit === 0 || view !== 'playing' || hasGuessed) return;
+      
+      setTimeLeft(roomData.settings.timeLimit);
+      
+      const interval = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            // Time is up! Submit automatically.
+            submitGuess(activeGuessRef.current, true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      
+      return () => clearInterval(interval);
+    }, [roomData?.currentRound, view, hasGuessed]);
+
     return (
       <div className="fixed inset-0 bg-black text-white font-sans flex flex-col">
         <div className="absolute inset-0 z-0 bg-black">
@@ -642,9 +715,21 @@ export default function App() {
           <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-transparent pointer-events-none z-10"></div>
         </div>
 
+        {/* Center Top Timer */}
+        {roomData.settings.timeLimit > 0 && !hasGuessed && (
+           <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none">
+              <div className={`backdrop-blur-md px-6 py-2 rounded-full border shadow-2xl flex items-center gap-2 ${timeLeft <= 10 ? 'bg-red-500/20 border-red-500/50' : 'bg-black/60 border-white/10'}`}>
+                 <Clock size={20} className={timeLeft <= 10 ? 'text-red-500 animate-pulse' : 'text-slate-300'} />
+                 <span className={`text-xl md:text-2xl font-black ${timeLeft <= 10 ? 'text-red-500' : 'text-white'}`}>
+                    {timeLeft}s
+                 </span>
+              </div>
+           </div>
+        )}
+
         <header className="relative z-20 p-4 md:p-6 flex justify-between items-start pointer-events-none">
           <div className="flex items-start gap-2 md:gap-3">
-             <button onClick={handleExit} className="pointer-events-auto bg-black/60 hover:bg-black/80 p-2 md:p-3 rounded-xl md:rounded-2xl border border-white/10 backdrop-blur-md text-slate-300 hover:text-white transition-colors shadow-2xl">
+             <button onClick={handleExit} className="pointer-events-auto bg-black/60 hover:bg-black/80 w-10 h-10 md:w-14 md:h-14 flex items-center justify-center rounded-xl md:rounded-2xl border border-white/10 backdrop-blur-md text-slate-300 hover:text-white transition-colors shadow-2xl">
                 <Home size={20} className="md:w-6 md:h-6" />
              </button>
              <div className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 md:px-6 md:py-3 rounded-xl md:rounded-2xl pointer-events-auto shadow-2xl">
@@ -692,7 +777,7 @@ export default function App() {
                   </button>
                   <GoogleMapCanvas interactable={true} activeGuess={activeGuess} activeGuessAvatar={myAvatar} onGuessChange={setActiveGuess} isExpanded={isMapExpanded} />
                   <div className="absolute bottom-4 left-0 right-0 z-[400] flex justify-center pointer-events-none px-4">
-                     <button onClick={submitGuess} disabled={!activeGuess} className={`pointer-events-auto w-full md:w-auto px-8 py-3 md:py-4 rounded-xl md:rounded-full font-black text-lg md:text-xl shadow-2xl transition-all transform border border-white/20 ${activeGuess ? 'bg-emerald-600 hover:bg-emerald-500 text-white scale-100' : 'bg-slate-900/80 backdrop-blur-sm text-slate-500 scale-90 opacity-0'}`}>
+                     <button onClick={() => submitGuess(activeGuess, false)} disabled={!activeGuess} className={`pointer-events-auto w-full md:w-auto px-8 py-3 md:py-4 rounded-xl md:rounded-full font-black text-lg md:text-xl shadow-2xl transition-all transform border border-white/20 ${activeGuess ? 'bg-emerald-600 hover:bg-emerald-500 text-white scale-100' : 'bg-slate-900/80 backdrop-blur-sm text-slate-500 scale-90 opacity-0'}`}>
                        Lock Guess
                      </button>
                   </div>
@@ -714,7 +799,7 @@ export default function App() {
      const currentGuesses = roomData.guesses[roomData.currentRound] || {};
      
      const myGuess = currentGuesses[uid];
-     const myDistance = myGuess ? Math.round(myGuess.distance) : null;
+     const myDistance = myGuess && myGuess.distance !== null ? Math.round(myGuess.distance) : null;
 
      const mapGuesses = allPlayers.map(([playerId, player]) => {
         const guess = currentGuesses[playerId];
@@ -724,14 +809,14 @@ export default function App() {
      
      const roundLeaderboard = allPlayers.map(([playerId, player]) => {
         const guess = currentGuesses[playerId];
-        return { name: player.name, avatar: player.avatar, color: player.color, roundScore: guess?.score || 0, roundDist: guess?.distance || 0 };
+        return { name: player.name, avatar: player.avatar, color: player.color, roundScore: guess?.score || 0, roundDist: guess?.distance };
      }).sort((a,b) => b.roundScore - a.roundScore);
 
      return (
        <div className="min-h-screen bg-slate-900 text-white flex flex-col overflow-hidden">
           <header className="p-4 md:p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950/50 shrink-0">
              <div className="flex items-center gap-3 md:gap-4">
-               <button onClick={handleExit} className="bg-slate-800 hover:bg-slate-700 p-2 md:p-3 rounded-xl transition-colors">
+               <button onClick={handleExit} className="bg-slate-800 hover:bg-slate-700 w-10 h-10 md:w-12 md:h-12 flex items-center justify-center rounded-xl transition-colors">
                  <Home size={18} className="text-slate-300 md:w-5 md:h-5"/>
                </button>
                <h2 className="text-lg md:text-2xl font-black">Round Results</h2>
@@ -746,8 +831,8 @@ export default function App() {
              <div className="md:col-span-2 relative flex flex-col p-4 md:p-6 gap-3 md:gap-4 h-[50vh] md:h-auto">
                 <div className="bg-slate-800 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-700 text-center shrink-0 shadow-lg">
                   <h3 className="text-slate-400 text-xs md:text-sm font-bold uppercase tracking-widest mb-1">Your Distance</h3>
-                  <h2 className="text-xl md:text-3xl font-black text-green-400 truncate">
-                    {myDistance !== null ? `${myDistance.toLocaleString()} km from location` : "No Guess"}
+                  <h2 className={`text-xl md:text-3xl font-black truncate ${myDistance !== null ? 'text-green-400' : 'text-red-400'}`}>
+                    {myDistance !== null ? `${myDistance.toLocaleString()} km from location` : "Time ran out (0 points)"}
                   </h2>
                 </div>
                 <div className="relative rounded-xl md:rounded-2xl overflow-hidden shadow-2xl border-2 md:border-4 border-slate-700 flex-1 min-h-[200px] md:min-h-[300px]">
@@ -765,7 +850,7 @@ export default function App() {
                      </div>
                      <div className="text-right">
                         <div className="text-base md:text-xl font-black text-emerald-400">+{p.roundScore}</div>
-                        <div className="text-[10px] md:text-xs font-mono text-slate-500">{p.roundDist > 0 ? `${Math.round(p.roundDist).toLocaleString()} km` : 'No Guess'}</div>
+                        <div className="text-[10px] md:text-xs font-mono text-slate-500">{p.roundDist !== null && p.roundDist !== undefined ? `${Math.round(p.roundDist).toLocaleString()} km` : 'No Guess'}</div>
                      </div>
                   </div>
                 ))}
