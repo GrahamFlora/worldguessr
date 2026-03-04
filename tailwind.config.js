@@ -2,7 +2,7 @@
 export default {
   content: [
     "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}", // <-- CRITICAL: This tells Tailwind to scan your App.jsx
+    "./src/**/*.{js,ts,jsx,tsx}", // <-- CRITICAL: This must be here!
   ],
   theme: {
     extend: {},
