@@ -237,6 +237,7 @@ export default function App() {
   const [view, setView] = useState('menu'); 
   const [playerName, setPlayerName] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [roomData, setRoomData] = useState(null);
   const [isSinglePlayer, setIsSinglePlayer] = useState(false);
@@ -258,6 +259,15 @@ export default function App() {
   const activeGuessRef = useRef(null);
 
   useEffect(() => { activeGuessRef.current = activeGuess; }, [activeGuess]);
+
+  // Handle Invitation Links
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '').substring(0, 4).toUpperCase();
+    if (hash.length === 4) {
+      setJoinCode(hash);
+      setInviteCode(hash);
+    }
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -336,18 +346,20 @@ export default function App() {
   };
 
   const joinRoom = async () => {
-    if (!user || !playerName.trim() || joinCode.length !== 4 || isJoining) return;
+    const codeToJoin = inviteCode || joinCode;
+    if (!user || !playerName.trim() || codeToJoin.length !== 4 || isJoining) return;
     setIsJoining(true);
     setErrorMsg('');
     try {
-      const roomRef = getRoomRef(joinCode);
+      const roomRef = getRoomRef(codeToJoin);
       const snap = await getDoc(roomRef);
       if (!snap.exists()) {
-        setErrorMsg('Room not found.');
+        setErrorMsg('Room not found. The host may have ended it.');
       } else {
         const data = snap.data();
         await updateDoc(roomRef, { [`players.${user.uid}`]: { name: playerName.trim().substring(0, 15), avatar: getAvatarUrl(user.uid), score: 0, color: getPlayerColor(Object.keys(data.players).length, 8) } });
-        setRoomCode(joinCode);
+        setRoomCode(codeToJoin);
+        setInviteCode(''); // Clear the invite screen state once successfully joined
         setView('lobby');
       }
     } catch (e) { setErrorMsg('Join Error.'); }
@@ -441,6 +453,9 @@ export default function App() {
     setActiveGuess(null);
     setIsMapExpanded(false);
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    // Remove the hash if exiting so it doesn't trigger the invite screen again
+    window.location.hash = '';
+    setInviteCode('');
   };
 
   useEffect(() => {
@@ -468,6 +483,45 @@ export default function App() {
 
   // --- 1. REVAMPED MENU VIEW ---
   if (view === 'menu') {
+    // 1A: Minimal Invite UI when a code is present in the URL
+    if (inviteCode) {
+      return (
+        <div className="min-h-screen bg-[#050B14] text-slate-100 flex items-center justify-center p-4 font-sans relative overflow-hidden">
+          {/* Animated Background Gradients */}
+          <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-emerald-600/20 blur-[120px] rounded-full pointer-events-none"></div>
+          <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none"></div>
+          
+          <div className="relative z-10 w-full max-w-md bg-slate-900/60 backdrop-blur-3xl border border-white/10 rounded-[2rem] shadow-[0_0_50px_rgba(0,0,0,0.5)] p-8 md:p-12 flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
+             <Globe size={64} className="text-emerald-400 mb-6 drop-shadow-[0_0_20px_rgba(52,211,153,0.6)] animate-pulse" />
+             <h2 className="text-3xl md:text-4xl font-black mb-2 tracking-tight text-white">Join Operation</h2>
+             <p className="text-slate-400 text-sm md:text-base mb-8">You've been invited to room <span className="text-white font-mono font-black bg-white/10 px-2 py-1 rounded ml-1 tracking-widest">{inviteCode}</span></p>
+
+             <div className="w-full space-y-4">
+               <div className="relative">
+                 <User size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                 <input type="text" placeholder="Enter your nickname..." value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl pl-12 pr-5 py-4 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-white font-bold text-lg transition-all placeholder:text-slate-600 shadow-inner"
+                  />
+               </div>
+               
+               <button onClick={joinRoom} disabled={!user || !playerName.trim() || isJoining} 
+                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-white p-4 rounded-2xl font-black tracking-widest text-lg shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all active:scale-95 flex justify-center items-center gap-2">
+                  {isJoining ? <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : "JOIN GAME"}
+               </button>
+             </div>
+
+             <button onClick={() => { setInviteCode(''); window.location.hash = ''; }} className="mt-8 text-slate-500 text-xs font-bold uppercase tracking-widest hover:text-white transition-colors">
+               Or return to Main Menu
+             </button>
+
+             {!user && <p className="mt-4 text-emerald-400/80 font-bold animate-pulse text-[10px] uppercase tracking-widest">Connecting to Database...</p>}
+             {errorMsg && <div className="mt-4 bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-2 rounded-xl backdrop-blur-md font-bold text-sm">{errorMsg}</div>}
+          </div>
+        </div>
+      );
+    }
+
+    // 1B: Standard Main Menu
     return (
       <div className="min-h-screen bg-[#050B14] text-slate-100 flex items-center justify-center p-4 md:p-8 font-sans relative overflow-hidden">
         {/* Animated Background Gradients */}
@@ -844,12 +898,12 @@ export default function App() {
                <List size={16} className="md:w-[18px] md:h-[18px]"/> REVIEW MATCH
              </button>
              {isHost && (
-               <button onClick={startSinglePlayer} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 md:px-10 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm shadow-[0_0_20px_rgba(37,99,235,0.4)] flex justify-center items-center gap-2 md:gap-3 transition-transform active:scale-95">
-                 <RotateCcw size={16} className="md:w-[18px] md:h-[18px]"/> DEPLOY AGAIN
+               <button onClick={isSinglePlayer ? startSinglePlayer : startMatch} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 md:px-10 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm shadow-[0_0_20px_rgba(37,99,235,0.4)] flex justify-center items-center gap-2 md:gap-3 transition-transform active:scale-95">
+                 <RotateCcw size={16} className="md:w-[18px] md:h-[18px]"/> PLAY AGAIN
                </button>
              )}
              <button onClick={handleExit} className="w-full sm:w-auto bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-6 md:px-8 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm flex justify-center items-center gap-2 md:gap-3 transition-colors">
-               <Home size={16} className="md:w-[18px] md:h-[18px]"/> ABORT
+               <Home size={16} className="md:w-[18px] md:h-[18px]"/> MAIN MENU
              </button>
            </div>
         </div>
