@@ -445,6 +445,19 @@ export default function App() {
     setIsMapExpanded(false);
   };
 
+  const returnToLobby = async () => {
+    if (!roomData || roomData.hostId !== user.uid) return;
+    const playersObj = { ...roomData.players };
+    Object.keys(playersObj).forEach((uid) => { playersObj[uid].score = 0; });
+    await updateDoc(getRoomRef(roomCode), {
+      status: 'lobby',
+      players: playersObj,
+      currentRound: 0,
+      guesses: {},
+      locations: []
+    });
+  };
+
   const handleExit = () => {
     setView('menu');
     setIsSinglePlayer(false);
@@ -712,15 +725,42 @@ export default function App() {
           </div>
         </header>
 
+        {/* --- Top Target Locked Banner --- */}
         {hasGuessed && (
-          <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-center justify-center pointer-events-auto animate-in fade-in duration-300 p-4">
-             <div className="bg-slate-900/80 backdrop-blur-2xl border border-white/10 p-8 md:p-10 rounded-3xl md:rounded-[2rem] text-center shadow-[0_0_50px_rgba(0,0,0,0.5)] transform animate-in zoom-in-95 w-full max-w-sm md:max-w-md">
-                <div className="w-16 h-16 md:w-20 md:h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 border border-emerald-500/50">
-                  <CheckCircle size={32} className="md:w-10 md:h-10 text-emerald-400" />
+          <div className="absolute top-20 md:top-24 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none animate-in slide-in-from-top-8 duration-500">
+             <div className="bg-emerald-900/80 backdrop-blur-2xl border border-emerald-400/50 px-6 py-3 md:px-8 md:py-4 rounded-full shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center gap-3 md:gap-4">
+                <CheckCircle size={20} className="md:w-6 md:h-6 text-emerald-400" />
+                <div className="flex flex-col">
+                  <span className="text-sm md:text-lg font-black text-white uppercase tracking-widest leading-none mb-1">Target Locked</span>
+                  <span className="text-emerald-200/80 text-[8px] md:text-[10px] font-bold uppercase tracking-widest leading-none">Awaiting others...</span>
                 </div>
-                <h2 className="text-2xl md:text-3xl font-black text-white mb-2">Target Locked</h2>
-                <p className="text-slate-400 text-xs md:text-sm tracking-wide font-medium uppercase">Awaiting coordinates from satellite...</p>
              </div>
+          </div>
+        )}
+
+        {/* --- Right Side Opponent Panel --- */}
+        {!isSinglePlayer && (
+          <div className="absolute top-24 md:top-28 right-4 md:right-6 z-20 flex flex-col gap-2 pointer-events-none items-end">
+            {Object.entries(roomData.players).map(([pid, p]) => {
+              const pHasGuessed = !!roomData.guesses[roomData.currentRound]?.[pid];
+              return (
+                <div key={pid} className={`backdrop-blur-xl border px-3 py-2 rounded-xl flex items-center gap-3 shadow-lg transition-all duration-300 ${pHasGuessed ? 'bg-emerald-900/60 border-emerald-500/50 scale-105' : 'bg-black/40 border-white/10 opacity-70'}`}>
+                   <div className="flex flex-col items-end">
+                     <span className="text-white font-bold text-xs md:text-sm">{p.name}</span>
+                     <div className="flex items-center gap-2 mt-0.5">
+                       <span className="text-white/80 font-mono text-[10px] md:text-xs font-black">{p.score.toLocaleString()} pts</span>
+                       <span className={`text-[8px] md:text-[9px] uppercase font-black tracking-widest px-1.5 py-0.5 rounded ${pHasGuessed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-slate-400 animate-pulse'}`}>
+                         {pHasGuessed ? 'Locked' : 'Thinking'}
+                       </span>
+                     </div>
+                   </div>
+                   <div className="relative">
+                     <img src={p.avatar} alt={p.name} className={`w-8 h-8 md:w-10 md:h-10 rounded-full border-2 transition-colors ${pHasGuessed ? 'border-emerald-400' : 'border-slate-600'}`} style={{ backgroundColor: p.color }} />
+                     {pHasGuessed && <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5"><CheckCircle size={10} /></div>}
+                   </div>
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -897,10 +937,14 @@ export default function App() {
              <button onClick={() => { setShowHistoryModal(true); setSelectedHistoryRound(matchHistory[0]); }} className="w-full sm:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-6 md:px-8 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm transition-all flex justify-center items-center gap-2 md:gap-3">
                <List size={16} className="md:w-[18px] md:h-[18px]"/> REVIEW MATCH
              </button>
-             {isHost && (
-               <button onClick={isSinglePlayer ? startSinglePlayer : startMatch} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 md:px-10 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm shadow-[0_0_20px_rgba(37,99,235,0.4)] flex justify-center items-center gap-2 md:gap-3 transition-transform active:scale-95">
-                 <RotateCcw size={16} className="md:w-[18px] md:h-[18px]"/> PLAY AGAIN
+             {isHost ? (
+               <button onClick={isSinglePlayer ? startSinglePlayer : returnToLobby} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 md:px-10 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm shadow-[0_0_20px_rgba(37,99,235,0.4)] flex justify-center items-center gap-2 md:gap-3 transition-transform active:scale-95">
+                 <RotateCcw size={16} className="md:w-[18px] md:h-[18px]"/> {isSinglePlayer ? 'PLAY AGAIN' : 'RETURN TO LOBBY'}
                </button>
+             ) : (
+               <div className="w-full sm:w-auto bg-white/5 border border-white/10 px-6 md:px-8 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm flex justify-center items-center gap-2 md:gap-3 text-slate-400">
+                 <div className="w-3 h-3 md:w-4 md:h-4 rounded-full bg-blue-500 animate-pulse"></div> WAITING FOR HOST
+               </div>
              )}
              <button onClick={handleExit} className="w-full sm:w-auto bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-6 md:px-8 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm flex justify-center items-center gap-2 md:gap-3 transition-colors">
                <Home size={16} className="md:w-[18px] md:h-[18px]"/> MAIN MENU
