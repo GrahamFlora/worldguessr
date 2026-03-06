@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection } from 'firebase/firestore';
-import { Globe, Users, Trophy, ArrowRight, Home, Map as MapIcon, Minimize2, Copy, CheckCircle, RotateCcw, User, Clock, MapPin, List, X, ChevronRight, Sparkles } from 'lucide-react';
+import { Globe, Users, Trophy, ArrowRight, Home, Map as MapIcon, Minimize2, Copy, CheckCircle, RotateCcw, User, Clock, MapPin, List, X, ChevronRight, Sparkles, Eye } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GOOGLE_MAPS_API_KEY = "AIzaSyClIIqqJnkI-7BviXgT4oB44nBtSF6FkNI"; 
@@ -241,6 +241,9 @@ export default function App() {
   const [roomCode, setRoomCode] = useState('');
   const [roomData, setRoomData] = useState(null);
   const [isSinglePlayer, setIsSinglePlayer] = useState(false);
+  const [hostWillPlay, setHostWillPlay] = useState(true); // New Host Option
+  const [showLivePlayers, setShowLivePlayers] = useState(true); // HUD Toggle
+
   const [errorMsg, setErrorMsg] = useState('');
   const [isGeneratingLocations, setIsGeneratingLocations] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
@@ -296,7 +299,9 @@ export default function App() {
         if (['lobby', 'playing', 'round_result', 'game_over'].includes(data.status)) setView(data.status);
         if (data.status === 'playing' && data.hostId === user.uid) {
           const currentGuesses = data.guesses[data.currentRound] || {};
-          if (Object.keys(currentGuesses).length === Object.keys(data.players).length) {
+          // Only wait for players that are actively in the game (not spectators)
+          const numActivePlayers = Object.keys(data.players).length;
+          if (numActivePlayers > 0 && Object.keys(currentGuesses).length === numActivePlayers) {
              const updatedPlayers = { ...data.players };
              Object.entries(currentGuesses).forEach(([uid, guess]) => updatedPlayers[uid].score += guess.score);
              updateDoc(roomRef, { status: 'round_result', players: updatedPlayers });
@@ -330,11 +335,16 @@ export default function App() {
     setErrorMsg('');
     const code = generateRoomCode();
     const roomRef = getRoomRef(code);
+    
+    const initialPlayers = hostWillPlay 
+      ? { [user.uid]: { name: playerName.trim().substring(0, 15), avatar: getAvatarUrl(user.uid), score: 0, color: getPlayerColor(0, 1) } }
+      : {};
+
     try {
       await setDoc(roomRef, {
         status: 'lobby', hostId: user.uid, 
         settings: { numRounds: 5, timeLimit, region },
-        players: { [user.uid]: { name: playerName.trim().substring(0, 15), avatar: getAvatarUrl(user.uid), score: 0, color: getPlayerColor(0, 1) } },
+        players: initialPlayers,
         locations: [], currentRound: 0, guesses: {}
       });
       setRoomCode(code);
@@ -359,7 +369,7 @@ export default function App() {
         const data = snap.data();
         await updateDoc(roomRef, { [`players.${user.uid}`]: { name: playerName.trim().substring(0, 15), avatar: getAvatarUrl(user.uid), score: 0, color: getPlayerColor(Object.keys(data.players).length, 8) } });
         setRoomCode(codeToJoin);
-        setInviteCode(''); // Clear the invite screen state once successfully joined
+        setInviteCode(''); 
         setView('lobby');
       }
     } catch (e) { setErrorMsg('Join Error.'); }
@@ -466,13 +476,13 @@ export default function App() {
     setActiveGuess(null);
     setIsMapExpanded(false);
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-    // Remove the hash if exiting so it doesn't trigger the invite screen again
     window.location.hash = '';
     setInviteCode('');
   };
 
   useEffect(() => {
-    if (view === 'playing' && roomData && roomData.settings?.timeLimit > 0) {
+    const isSpectating = roomData && !isSinglePlayer && user && !roomData.players[user.uid];
+    if (view === 'playing' && roomData && roomData.settings?.timeLimit > 0 && !isSpectating) {
       const uid = isSinglePlayer ? Object.keys(roomData.players)[0] : user?.uid;
       const hasGuessed = uid && !!roomData.guesses[roomData.currentRound]?.[uid];
       if (!hasGuessed) {
@@ -589,6 +599,18 @@ export default function App() {
                   ))}
                 </div>
               </div>
+
+              {/* Host Settings */}
+              <div className="flex items-center justify-between bg-black/40 border border-white/10 rounded-2xl p-4 shadow-inner">
+                <div className="flex flex-col">
+                  <span className="text-slate-300 text-xs font-bold uppercase tracking-widest mb-1">Play as Host?</span>
+                  <span className="text-[10px] text-slate-500">Disable to only spectate & control the room</span>
+                </div>
+                <button onClick={() => setHostWillPlay(!hostWillPlay)} className={`w-12 h-6 rounded-full transition-colors relative flex items-center ${hostWillPlay ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white transition-transform transform absolute ${hostWillPlay ? 'translate-x-7' : 'translate-x-1'}`} />
+                </button>
+              </div>
+
             </div>
 
             <div className="space-y-4 pt-4 border-t border-white/5">
@@ -599,7 +621,7 @@ export default function App() {
                   </button>
                   <button onClick={createRoom} disabled={!user || !playerName.trim() || isJoining || isGeneratingLocations} 
                     className="w-1/2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white p-3 md:p-4 rounded-2xl font-bold flex justify-center items-center gap-2 shadow-[0_0_25px_rgba(79,70,229,0.4)] transition-all active:scale-95 text-sm md:text-base">
-                    {isJoining ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <><Users size={20} /> Host Room</>}
+                    {isJoining && !isSinglePlayer ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <><Users size={20} /> Host Room</>}
                   </button>
                </div>
 
@@ -628,6 +650,7 @@ export default function App() {
   // --- 2. REVAMPED LOBBY VIEW ---
   if (view === 'lobby' && !isSinglePlayer && roomData) {
     const isHost = roomData.hostId === user?.uid;
+    const isSpectator = !roomData.players[user?.uid];
     const playersList = Object.values(roomData.players);
     const shareUrl = getShareLink();
 
@@ -639,7 +662,9 @@ export default function App() {
           
           {/* Code Section */}
           <div className="flex-1 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-white/10 pb-8 md:pb-0 md:pr-12 text-center shrink-0">
-            <div className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-4 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest mb-4 md:mb-6 inline-flex items-center gap-2"><Sparkles size={14}/> Waiting Area</div>
+            <div className={`bg-blue-500/10 ${isSpectator ? 'text-blue-300' : 'text-blue-400'} border border-blue-500/20 px-4 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest mb-4 md:mb-6 inline-flex items-center gap-2`}>
+              <Sparkles size={14}/> {isSpectator ? 'Spectating Room' : 'Waiting Area'}
+            </div>
             <p className="text-slate-500 font-bold tracking-[0.2em] uppercase mb-2 text-xs">Room Code</p>
             <h2 className="text-5xl sm:text-6xl md:text-8xl font-black font-mono tracking-widest text-white drop-shadow-[0_0_40px_rgba(255,255,255,0.3)] mb-6 md:mb-8 select-all">{roomCode}</h2>
             <div className="w-full max-w-sm flex bg-black/50 p-1.5 rounded-2xl border border-white/10 shadow-inner">
@@ -659,6 +684,7 @@ export default function App() {
             
             {/* Highly constrained player list area to prevent expanding on mobile */}
             <div className="flex flex-wrap gap-3 mb-6 md:mb-8 overflow-y-auto max-h-[30vh] md:max-h-[40vh] custom-scrollbar pr-2 items-start justify-center md:justify-start">
+              {playersList.length === 0 && <span className="text-slate-500 font-bold text-sm text-center w-full py-4">Waiting for players to join...</span>}
               {playersList.map((p, i) => (
                 <div key={i} className="bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full flex items-center gap-3 border border-white/10 transition-colors shadow-sm">
                   <div className="relative shrink-0">
@@ -671,7 +697,7 @@ export default function App() {
             
             <div className="mt-auto shrink-0">
                {isHost ? (
-                 <button onClick={startMatch} disabled={isGeneratingLocations} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 p-4 md:p-5 rounded-2xl font-black text-lg md:text-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] flex justify-center items-center gap-3 transition-transform active:scale-95 text-white">
+                 <button onClick={startMatch} disabled={isGeneratingLocations || playersList.length === 0} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 p-4 md:p-5 rounded-2xl font-black text-lg md:text-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] flex justify-center items-center gap-3 transition-transform active:scale-95 text-white">
                    {isGeneratingLocations ? <div className="w-5 h-5 md:w-6 md:h-6 border-4 border-white border-t-transparent rounded-full animate-spin" /> : <>START MATCH <ArrowRight size={20} /></>}
                  </button>
                ) : <div className="w-full bg-white/5 border border-white/10 p-4 md:p-5 rounded-2xl text-center text-slate-400 font-bold flex justify-center items-center gap-3 text-sm md:text-base"><div className="w-3 h-3 md:w-4 md:h-4 rounded-full bg-blue-500 animate-pulse"></div> Waiting for host...</div>}
@@ -686,7 +712,8 @@ export default function App() {
   if (view === 'playing' && roomData) {
     const currentLoc = roomData.locations[roomData.currentRound];
     const uid = isSinglePlayer ? Object.keys(roomData.players)[0] : user.uid;
-    const hasGuessed = !!roomData.guesses[roomData.currentRound]?.[uid];
+    const isSpectating = !isSinglePlayer && !roomData.players[uid];
+    const hasGuessed = !isSpectating && !!roomData.guesses[roomData.currentRound]?.[uid];
 
     return (
       <div className="fixed inset-0 bg-black text-white font-sans flex flex-col overflow-hidden">
@@ -695,8 +722,8 @@ export default function App() {
           <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.8)] pointer-events-none z-10"></div>
         </div>
 
-        {/* Floating Timer Pill */}
-        {roomData.settings.timeLimit > 0 && !hasGuessed && (
+        {/* Floating Timer Pill (Only shown if playing and haven't guessed) */}
+        {roomData.settings.timeLimit > 0 && !hasGuessed && !isSpectating && (
            <div className="absolute top-4 md:top-6 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none animate-in slide-in-from-top-4">
               <div className={`backdrop-blur-xl px-4 md:px-6 py-2 md:py-2.5 rounded-full border shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex items-center gap-2 md:gap-3 transition-colors duration-300 ${timeLeft <= 10 ? 'bg-red-500/20 border-red-500/60 shadow-[0_0_30px_rgba(239,68,68,0.4)]' : 'bg-black/40 border-white/10'}`}>
                  <Clock size={16} className={`md:w-5 md:h-5 ${timeLeft <= 10 ? 'text-red-400 animate-pulse' : 'text-slate-300'}`} />
@@ -705,67 +732,87 @@ export default function App() {
            </div>
         )}
 
-        {/* Minimalist Top HUD */}
-        <header className="relative z-20 p-4 md:p-6 flex justify-between items-start pointer-events-none">
-          <div className="bg-black/40 backdrop-blur-xl border border-white/10 px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl flex items-center gap-3 shadow-2xl">
-             <div className="bg-white/10 p-1.5 md:p-2 rounded-lg md:rounded-xl">
-               {roomData.settings.region === 'philippines' ? <MapPin size={16} className="text-blue-400 md:w-5 md:h-5" /> : <Globe size={16} className="text-blue-400 md:w-5 md:h-5" />}
-             </div>
-             <div className="flex flex-col pr-1 md:pr-2">
-               <span className="text-[8px] md:text-[10px] font-bold text-blue-300 uppercase tracking-widest">{isSinglePlayer ? 'Solo Mode' : 'Match'}</span>
-               <span className="text-sm md:text-base font-black text-white">Round {roomData.currentRound + 1} <span className="text-white/30">/</span> {roomData.settings.numRounds}</span>
-             </div>
-          </div>
-          
-          <div className="bg-black/40 backdrop-blur-xl border border-white/10 px-4 md:px-5 py-2 md:py-3 rounded-xl md:rounded-2xl flex items-center gap-4 shadow-2xl">
-             <div className="flex flex-col items-end">
-               <span className="text-[8px] md:text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Total Score</span>
-               <span className="text-base md:text-xl font-black text-white font-mono tracking-tight">{roomData.players[uid]?.score.toLocaleString()}</span>
-             </div>
-          </div>
-        </header>
-
         {/* --- Top Target Locked Banner --- */}
         {hasGuessed && (
-          <div className="absolute top-20 md:top-24 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none animate-in slide-in-from-top-8 duration-500">
-             <div className="bg-emerald-900/80 backdrop-blur-2xl border border-emerald-400/50 px-6 py-3 md:px-8 md:py-4 rounded-full shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center gap-3 md:gap-4">
+          <div className="absolute top-4 md:top-6 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none animate-in slide-in-from-top-8 duration-500">
+             <div className="bg-emerald-900/90 backdrop-blur-2xl border border-emerald-400/50 px-6 py-2 md:px-8 md:py-3 rounded-full shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center gap-3">
                 <CheckCircle size={20} className="md:w-6 md:h-6 text-emerald-400" />
                 <div className="flex flex-col">
-                  <span className="text-sm md:text-lg font-black text-white uppercase tracking-widest leading-none mb-1">Target Locked</span>
+                  <span className="text-sm md:text-base font-black text-white uppercase tracking-widest leading-none mb-0.5">Target Locked</span>
                   <span className="text-emerald-200/80 text-[8px] md:text-[10px] font-bold uppercase tracking-widest leading-none">Awaiting others...</span>
                 </div>
              </div>
           </div>
         )}
 
-        {/* --- Right Side Opponent Panel --- */}
-        {!isSinglePlayer && (
-          <div className="absolute top-24 md:top-28 right-4 md:right-6 z-20 flex flex-col gap-2 pointer-events-none items-end">
-            {Object.entries(roomData.players).map(([pid, p]) => {
-              const pHasGuessed = !!roomData.guesses[roomData.currentRound]?.[pid];
-              return (
-                <div key={pid} className={`backdrop-blur-xl border px-3 py-2 rounded-xl flex items-center gap-3 shadow-lg transition-all duration-300 ${pHasGuessed ? 'bg-emerald-900/60 border-emerald-500/50 scale-105' : 'bg-black/40 border-white/10 opacity-70'}`}>
-                   <div className="flex flex-col items-end">
-                     <span className="text-white font-bold text-xs md:text-sm">{p.name}</span>
-                     <div className="flex items-center gap-2 mt-0.5">
-                       <span className="text-white/80 font-mono text-[10px] md:text-xs font-black">{p.score.toLocaleString()} pts</span>
-                       <span className={`text-[8px] md:text-[9px] uppercase font-black tracking-widest px-1.5 py-0.5 rounded ${pHasGuessed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-slate-400 animate-pulse'}`}>
+        {/* Top Left HUD */}
+        <div className="absolute top-4 md:top-6 left-4 md:left-6 z-20 pointer-events-none">
+           <div className="bg-black/60 backdrop-blur-xl border border-white/10 px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl flex items-center gap-3 shadow-2xl">
+             <div className="bg-white/10 p-1.5 md:p-2 rounded-lg md:rounded-xl">
+               {roomData.settings.region === 'philippines' ? <MapPin size={16} className="text-blue-400 md:w-5 md:h-5" /> : <Globe size={16} className="text-blue-400 md:w-5 md:h-5" />}
+             </div>
+             <div className="flex flex-col pr-1 md:pr-2">
+               <span className="text-[8px] md:text-[10px] font-bold text-blue-300 uppercase tracking-widest">{isSpectating ? 'Spectating' : (isSinglePlayer ? 'Solo Mode' : 'Match')}</span>
+               <span className="text-sm md:text-base font-black text-white">Round {roomData.currentRound + 1} <span className="text-white/30">/</span> {roomData.settings.numRounds}</span>
+             </div>
+          </div>
+        </div>
+
+        {/* Top Right HUD (Seamless Combined Panel) */}
+        {isSinglePlayer ? (
+          <div className="absolute top-4 md:top-6 right-4 md:right-6 z-20 pointer-events-none shadow-2xl">
+             <div className="bg-black/60 backdrop-blur-xl border border-white/10 px-4 md:px-5 py-2 md:py-3 rounded-xl md:rounded-2xl flex flex-col items-end">
+               <span className="text-[8px] md:text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Total Score</span>
+               <span className="text-base md:text-xl font-black text-white font-mono tracking-tight">{roomData.players[uid]?.score.toLocaleString()}</span>
+             </div>
+          </div>
+        ) : (
+          <div className="absolute top-4 md:top-6 right-4 md:right-6 z-20 flex flex-col items-end pointer-events-auto shadow-2xl w-52 md:w-64">
+            <div 
+              onClick={() => setShowLivePlayers(!showLivePlayers)}
+              className="w-full bg-black/60 backdrop-blur-xl border border-white/10 px-3 py-2 md:px-4 md:py-3 flex justify-between items-center cursor-pointer hover:bg-black/50 transition-colors"
+              style={{ borderTopLeftRadius: '1rem', borderTopRightRadius: '1rem', borderBottomLeftRadius: showLivePlayers ? 0 : '1rem', borderBottomRightRadius: showLivePlayers ? 0 : '1rem' }}
+            >
+              <div className="flex flex-col items-start">
+                <span className="text-[8px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</span>
+                <span className="text-xs font-black text-white">{Object.keys(roomData.guesses[roomData.currentRound] || {}).length} / {Object.keys(roomData.players).length} Locked</span>
+              </div>
+              {!isSpectating ? (
+                 <div className="flex flex-col items-end">
+                   <span className="text-[8px] md:text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Score</span>
+                   <span className="text-sm md:text-lg font-black text-white font-mono tracking-tight">{roomData.players[uid]?.score.toLocaleString()}</span>
+                 </div>
+              ) : (
+                 <div className="flex flex-col items-end">
+                   <span className="text-[8px] md:text-[10px] font-bold text-blue-400 uppercase tracking-widest flex items-center gap-1"><Eye size={10}/> Spectator</span>
+                 </div>
+              )}
+            </div>
+
+            {/* Expandable Player List embedded directly below the score panel */}
+            <div className={`w-full bg-black/40 backdrop-blur-xl border-x border-b border-white/10 overflow-hidden transition-all duration-300 ${showLivePlayers ? 'max-h-[40vh] opacity-100' : 'max-h-0 opacity-0 border-b-transparent'}`} style={{ borderBottomLeftRadius: '1rem', borderBottomRightRadius: '1rem' }}>
+              <div className="p-2 overflow-y-auto custom-scrollbar max-h-[40vh] space-y-1">
+                {Object.entries(roomData.players).map(([pid, p]) => {
+                  const pHasGuessed = !!roomData.guesses[roomData.currentRound]?.[pid];
+                  return (
+                    <div key={pid} className={`px-2 py-2 md:px-3 md:py-2.5 rounded-lg md:rounded-xl flex items-center justify-between gap-2 transition-all duration-300 ${pHasGuessed ? 'bg-emerald-900/40 border border-emerald-500/30' : 'bg-white/5 border border-white/5'}`}>
+                       <div className="flex items-center gap-2 min-w-0">
+                          <img src={p.avatar} alt={p.name} className={`w-5 h-5 md:w-6 md:h-6 rounded-full border shrink-0 ${pHasGuessed ? 'border-emerald-400' : 'border-slate-600'}`} style={{ backgroundColor: p.color }} />
+                          <span className="text-white font-bold text-[10px] md:text-xs truncate">{p.name}</span>
+                       </div>
+                       <span className={`text-[7px] md:text-[8px] uppercase font-black tracking-widest px-1.5 py-0.5 rounded shrink-0 ${pHasGuessed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-slate-400 animate-pulse'}`}>
                          {pHasGuessed ? 'Locked' : 'Thinking'}
                        </span>
-                     </div>
-                   </div>
-                   <div className="relative">
-                     <img src={p.avatar} alt={p.name} className={`w-8 h-8 md:w-10 md:h-10 rounded-full border-2 transition-colors ${pHasGuessed ? 'border-emerald-400' : 'border-slate-600'}`} style={{ backgroundColor: p.color }} />
-                     {pHasGuessed && <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5"><CheckCircle size={10} /></div>}
-                   </div>
-                </div>
-              )
-            })}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         )}
 
         {/* MASSIVE MAP BUTTON (LOWER RIGHT) */}
-        {!hasGuessed && (
+        {!hasGuessed && !isSpectating && (
           <div className={`absolute bottom-4 right-4 md:bottom-10 md:right-10 z-40 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] flex flex-col items-end pointer-events-auto
             ${isMapExpanded ? 'w-[95vw] h-[80vh] md:w-[800px] md:h-[600px] max-w-full rounded-2xl md:rounded-[2rem]' : 'w-40 h-14 md:w-64 md:h-20 hover:scale-[1.03] rounded-full'}`
           }>
@@ -813,6 +860,7 @@ export default function App() {
      const currentLoc = roomData.locations[roomData.currentRound];
      const uid = isSinglePlayer ? Object.keys(roomData.players)[0] : user.uid;
      const isHost = isSinglePlayer || roomData.hostId === uid;
+     const isSpectating = !isSinglePlayer && !roomData.players[uid];
      const allPlayers = Object.entries(roomData.players);
      const currentGuesses = roomData.guesses[roomData.currentRound] || {};
      const myGuess = currentGuesses[uid];
@@ -841,18 +889,25 @@ export default function App() {
                
                {/* Map & Distance Panel */}
                <div className="flex-1 flex flex-col gap-3 md:gap-5 min-h-[40vh] md:min-h-0 overflow-hidden">
-                  <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-4 md:p-5 rounded-2xl md:rounded-3xl border border-white/10 shadow-2xl flex items-center justify-between shrink-0">
-                    <div>
-                      <h3 className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-[0.2em] mb-1">Impact Distance</h3>
-                      <h2 className={`text-2xl md:text-4xl font-black tracking-tighter ${myDistance !== null ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]' : 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.3)]'}`}>
-                        {myDistance !== null ? `${myDistance.toLocaleString()} KM` : "SIGNAL LOST"}
-                      </h2>
-                    </div>
-                    {myDistance !== null && <div className="text-right">
-                      <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-[0.2em] mb-1">Points Gained</p>
-                      <p className="text-xl md:text-3xl font-black text-blue-400">+{myGuess?.score?.toLocaleString()}</p>
-                    </div>}
-                  </div>
+                  
+                  {isSpectating ? (
+                     <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-4 md:p-5 rounded-2xl md:rounded-3xl border border-white/10 shadow-2xl flex items-center justify-center shrink-0">
+                        <h2 className="text-xl md:text-2xl font-black tracking-widest uppercase text-blue-400 flex items-center gap-3"><Eye size={24}/> Spectator Mode</h2>
+                     </div>
+                  ) : (
+                     <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-4 md:p-5 rounded-2xl md:rounded-3xl border border-white/10 shadow-2xl flex items-center justify-between shrink-0">
+                       <div>
+                         <h3 className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-[0.2em] mb-1">Impact Distance</h3>
+                         <h2 className={`text-2xl md:text-4xl font-black tracking-tighter ${myDistance !== null ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]' : 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.3)]'}`}>
+                           {myDistance !== null ? `${myDistance.toLocaleString()} KM` : "SIGNAL LOST"}
+                         </h2>
+                       </div>
+                       {myDistance !== null && <div className="text-right">
+                         <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-[0.2em] mb-1">Points Gained</p>
+                         <p className="text-xl md:text-3xl font-black text-blue-400">+{myGuess?.score?.toLocaleString()}</p>
+                       </div>}
+                     </div>
+                  )}
                   
                   {/* Fixed Map Container with flex-1 and absolute positioning inside */}
                   <div className="relative rounded-2xl md:rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.5)] border border-white/10 flex-1 bg-slate-900 min-h-[200px]">
@@ -906,7 +961,7 @@ export default function App() {
            
            <h4 className="text-yellow-500/80 font-bold tracking-[0.2em] md:tracking-[0.3em] uppercase mb-2 text-[10px] md:text-sm">Operation Complete</h4>
            <h2 className="text-4xl sm:text-5xl md:text-7xl font-black mb-8 md:mb-12 bg-gradient-to-b from-white via-yellow-100 to-yellow-500 bg-clip-text text-transparent text-center leading-tight tracking-tighter drop-shadow-2xl px-2">
-             {finalLeaderboard[0].name} Wins!
+             {finalLeaderboard.length > 0 ? `${finalLeaderboard[0].name} Wins!` : 'No Players Joined'}
            </h2>
            
            <div className="w-full bg-slate-900/60 backdrop-blur-2xl rounded-2xl md:rounded-[2rem] border border-white/10 overflow-hidden mb-8 md:mb-10 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
@@ -934,9 +989,11 @@ export default function App() {
            </div>
 
            <div className="flex flex-col sm:flex-row gap-3 md:gap-5 w-full justify-center px-4">
-             <button onClick={() => { setShowHistoryModal(true); setSelectedHistoryRound(matchHistory[0]); }} className="w-full sm:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-6 md:px-8 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm transition-all flex justify-center items-center gap-2 md:gap-3">
-               <List size={16} className="md:w-[18px] md:h-[18px]"/> REVIEW MATCH
-             </button>
+             {matchHistory.length > 0 && (
+               <button onClick={() => { setShowHistoryModal(true); setSelectedHistoryRound(matchHistory[0]); }} className="w-full sm:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-6 md:px-8 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm transition-all flex justify-center items-center gap-2 md:gap-3">
+                 <List size={16} className="md:w-[18px] md:h-[18px]"/> REVIEW MATCH
+               </button>
+             )}
              {isHost ? (
                <button onClick={isSinglePlayer ? startSinglePlayer : returnToLobby} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 md:px-10 py-4 md:py-5 rounded-xl md:rounded-2xl font-black tracking-widest text-xs md:text-sm shadow-[0_0_20px_rgba(37,99,235,0.4)] flex justify-center items-center gap-2 md:gap-3 transition-transform active:scale-95">
                  <RotateCcw size={16} className="md:w-[18px] md:h-[18px]"/> {isSinglePlayer ? 'PLAY AGAIN' : 'RETURN TO LOBBY'}
