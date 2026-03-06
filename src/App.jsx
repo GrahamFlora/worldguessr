@@ -503,6 +503,46 @@ export default function App() {
     }
   }, [view, roomData?.currentRound, isSinglePlayer, user?.uid]);
 
+  // --- MOCKUP DEVELOPMENT TOOLS ---
+  const addTestBots = async () => {
+    if (!roomData || roomData.hostId !== user.uid) return;
+    const newPlayers = { ...roomData.players };
+    for (let i = 1; i <= 40; i++) {
+      const botId = `bot_${Math.random().toString(36).substring(2, 9)}`;
+      newPlayers[botId] = {
+        name: `Operative ${i}`,
+        avatar: getAvatarUrl(botId),
+        score: 0,
+        color: getPlayerColor(i, 40)
+      };
+    }
+    await updateDoc(getRoomRef(roomCode), { players: newPlayers });
+  };
+
+  const simulateBotGuesses = async () => {
+    if (!roomData || roomData.hostId !== user.uid) return;
+    const currentLoc = roomData.locations[roomData.currentRound];
+    const currentGuesses = roomData.guesses[roomData.currentRound] || {};
+    const updates = {};
+    
+    let botsAdded = false;
+    Object.keys(roomData.players).forEach(pid => {
+      if (pid.startsWith('bot_') && !currentGuesses[pid]) {
+        // Create random coordinates centered around the actual location
+        const lat = currentLoc.lat + (Math.random() - 0.5) * 60; 
+        const lng = currentLoc.lng + (Math.random() - 0.5) * 60;
+        const distance = calculateDistance(lat, lng, currentLoc.lat, currentLoc.lng);
+        const score = calculateScore(distance);
+        updates[`guesses.${roomData.currentRound}.${pid}`] = { lat, lng, distance, score };
+        botsAdded = true;
+      }
+    });
+    
+    if (botsAdded) {
+      await updateDoc(getRoomRef(roomCode), updates);
+    }
+  };
+
 
   // --- 1. REVAMPED MENU VIEW ---
   if (view === 'menu') {
@@ -697,9 +737,14 @@ export default function App() {
             
             <div className="mt-auto shrink-0">
                {isHost ? (
-                 <button onClick={startMatch} disabled={isGeneratingLocations || playersList.length === 0} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 p-4 md:p-5 rounded-2xl font-black text-lg md:text-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] flex justify-center items-center gap-3 transition-transform active:scale-95 text-white">
-                   {isGeneratingLocations ? <div className="w-5 h-5 md:w-6 md:h-6 border-4 border-white border-t-transparent rounded-full animate-spin" /> : <>START MATCH <ArrowRight size={20} /></>}
-                 </button>
+                 <div className="flex flex-col gap-3">
+                   <button onClick={startMatch} disabled={isGeneratingLocations || playersList.length === 0} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 p-4 md:p-5 rounded-2xl font-black text-lg md:text-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] flex justify-center items-center gap-3 transition-transform active:scale-95 text-white">
+                     {isGeneratingLocations ? <div className="w-5 h-5 md:w-6 md:h-6 border-4 border-white border-t-transparent rounded-full animate-spin" /> : <>START MATCH <ArrowRight size={20} /></>}
+                   </button>
+                   <button onClick={addTestBots} className="text-[10px] text-slate-500 hover:text-white uppercase tracking-widest transition-colors font-bold border border-slate-800 rounded-full py-1.5 px-4 w-max mx-auto hover:bg-slate-800">
+                     [DEV] Add 40 Test Bots
+                   </button>
+                 </div>
                ) : <div className="w-full bg-white/5 border border-white/10 p-4 md:p-5 rounded-2xl text-center text-slate-400 font-bold flex justify-center items-center gap-3 text-sm md:text-base"><div className="w-3 h-3 md:w-4 md:h-4 rounded-full bg-blue-500 animate-pulse"></div> Waiting for host...</div>}
             </div>
           </div>
@@ -746,8 +791,8 @@ export default function App() {
         )}
 
         {/* Top Left HUD */}
-        <div className="absolute top-4 md:top-6 left-4 md:left-6 z-20 pointer-events-none">
-           <div className="bg-black/60 backdrop-blur-xl border border-white/10 px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl flex items-center gap-3 shadow-2xl">
+        <div className="absolute top-4 md:top-6 left-4 md:left-6 z-20 pointer-events-none flex flex-col items-start gap-2">
+           <div className="bg-black/60 backdrop-blur-xl border border-white/10 px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl flex items-center gap-3 shadow-2xl pointer-events-auto">
              <div className="bg-white/10 p-1.5 md:p-2 rounded-lg md:rounded-xl">
                {roomData.settings.region === 'philippines' ? <MapPin size={16} className="text-blue-400 md:w-5 md:h-5" /> : <Globe size={16} className="text-blue-400 md:w-5 md:h-5" />}
              </div>
@@ -756,6 +801,13 @@ export default function App() {
                <span className="text-sm md:text-base font-black text-white">Round {roomData.currentRound + 1} <span className="text-white/30">/</span> {roomData.settings.numRounds}</span>
              </div>
           </div>
+
+          {/* Dev Mode Bot Simulation Button */}
+          {isHost && Object.keys(roomData.players).some(p => p.startsWith('bot_')) && (
+            <button onClick={simulateBotGuesses} className="bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-300 text-[9px] md:text-[10px] uppercase font-bold tracking-widest px-3 py-1.5 rounded-full backdrop-blur-md transition-colors pointer-events-auto shadow-lg w-max">
+              [DEV] Simulate Bot Guesses
+            </button>
+          )}
         </div>
 
         {/* Top Right HUD (Seamless Combined Panel) */}
