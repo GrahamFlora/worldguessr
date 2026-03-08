@@ -490,6 +490,7 @@ export default function App() {
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [startCountdown, setStartCountdown] = useState(3); // Real-time countdown state
   
   const [matchHistory, setMatchHistory] = useState([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -573,7 +574,11 @@ export default function App() {
       if (snapshot.exists()) {
         const data = snapshot.data();
         setRoomData(data);
-        if (['lobby', 'playing', 'round_result', 'game_over'].includes(data.status)) setView(data.status);
+        if (['lobby', 'starting', 'playing', 'round_result', 'game_over'].includes(data.status)) {
+           // Reset countdown if we just switched to starting mode
+           if (data.status === 'starting' && view !== 'starting') setStartCountdown(3);
+           setView(data.status);
+        }
         if (data.status === 'playing' && data.hostId === user.uid) {
           const currentGuesses = data.guesses?.[data.currentRound] || {}; // SAFE GUARD
           // Only wait for players that are actively in the game (not spectators)
@@ -681,12 +686,13 @@ export default function App() {
       const uid = user ? user.uid : 'solo';
       const finalName = playerName.trim() || 'Guest';
       setRoomData({
-         status: 'playing', hostId: uid, 
+         status: 'starting', hostId: uid, 
          settings: { numRounds, timeLimit, region },
          players: { [uid]: { name: finalName, avatar: customAvatar || getAvatarUrl(avatarSeed), score: 0, color: '#3b82f6' } },
          locations, currentRound: 0, guesses: {}
       });
-      setView('playing');
+      setView('starting');
+      setStartCountdown(3);
       setIsMapExpanded(false);
       setActiveGuess(null);
       setHideUI(false);
@@ -715,7 +721,10 @@ export default function App() {
 
       const playersObj = { ...(roomData.players || {}) }; // SAFE GUARD
       Object.keys(playersObj).forEach((uid) => { playersObj[uid].score = 0; });
-      await updateDoc(getRoomRef(roomCode), { status: 'playing', locations, currentRound: 0, players: playersObj, guesses: {} });
+      
+      // Update DB to "starting" to trigger countdown on all clients
+      await updateDoc(getRoomRef(roomCode), { status: 'starting', locations, currentRound: 0, players: playersObj, guesses: {} });
+      
       setHideUI(false);
       setFocusedPlayerId(null);
     } catch (err) { setErrorMsg("Match Start Failed."); } finally { setIsGeneratingLocations(false); }
@@ -795,6 +804,31 @@ export default function App() {
     window.location.hash = '';
     setInviteCode('');
   };
+
+  // Live Countdown Manager
+  useEffect(() => {
+    if (view === 'starting') {
+      const interval = setInterval(() => {
+        setStartCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            if (isSinglePlayer) {
+              setRoomData(d => ({ ...d, status: 'playing' }));
+              setView('playing');
+            } else if (roomData?.hostId === user?.uid) {
+               // Only Host pushes the 'playing' state to Firebase to sync everyone
+               if (roomDataRef.current?.status === 'starting') {
+                 updateDoc(getRoomRef(roomCode), { status: 'playing' });
+               }
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [view, isSinglePlayer, roomCode, user?.uid]);
 
   useEffect(() => {
     // Start/reset timer when entering 'playing' state for a new round
@@ -894,6 +928,12 @@ export default function App() {
           <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-emerald-600/20 blur-[120px] rounded-full pointer-events-none"></div>
           <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none"></div>
           
+          {/* Quick Exit Button */}
+          <button onClick={handleExit} className="absolute top-4 left-4 md:top-8 md:left-8 bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-white/10 hover:border-red-500/50 p-2.5 md:p-3 rounded-full transition-all z-50 shadow-lg group flex items-center gap-2" title="Return to Main Menu">
+             <Home size={20} />
+             <span className="hidden group-hover:block text-xs font-black uppercase tracking-widest px-2">Main Menu</span>
+          </button>
+
           <div className="relative z-10 w-full max-w-md bg-slate-900/60 backdrop-blur-3xl border border-white/10 rounded-[2rem] shadow-[0_0_50px_rgba(0,0,0,0.5)] p-8 md:p-12 flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
              <Globe size={64} className="text-emerald-400 mb-6 drop-shadow-[0_0_20px_rgba(52,211,153,0.6)] animate-pulse" />
              <h2 className="text-3xl md:text-4xl font-black mb-2 tracking-tight text-white">Join Operation</h2>
@@ -927,11 +967,7 @@ export default function App() {
                </button>
              </div>
 
-             <button onClick={() => { setInviteCode(''); window.location.hash = ''; }} className="mt-8 text-slate-500 text-xs font-bold uppercase tracking-widest hover:text-white transition-colors">
-               Or return to Main Menu
-             </button>
-
-             {!user && <p className="mt-4 text-emerald-400/80 font-bold animate-pulse text-[10px] uppercase tracking-widest">Connecting to Database...</p>}
+             {!user && <p className="mt-8 text-emerald-400/80 font-bold animate-pulse text-[10px] uppercase tracking-widest">Connecting to Database...</p>}
              {errorMsg && <div className="mt-4 bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-2 rounded-xl backdrop-blur-md font-bold text-sm">{errorMsg}</div>}
           </div>
         </div>
@@ -1154,7 +1190,7 @@ export default function App() {
       <div className="min-h-screen bg-[#050B14] text-slate-100 flex flex-col items-center justify-center p-4 md:p-8 font-sans relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-900/20 via-[#050B14] to-[#050B14] pointer-events-none"></div>
         
-        {/* Quick Exit Button (Moved to absolute screen edge to prevent intersection) */}
+        {/* Quick Exit Button */}
         <button onClick={handleExit} className="absolute top-4 left-4 md:top-8 md:left-8 bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-white/10 hover:border-red-500/50 p-2.5 md:p-3 rounded-full transition-all z-50 shadow-lg group flex items-center gap-2" title="Return to Main Menu">
            <Home size={20} />
            <span className="hidden group-hover:block text-xs font-black uppercase tracking-widest px-2">Leave Room</span>
@@ -1162,45 +1198,56 @@ export default function App() {
 
         <div className="w-full max-w-7xl bg-slate-900/40 backdrop-blur-3xl p-6 md:p-10 rounded-[2.5rem] shadow-2xl border border-white/10 relative z-10 flex flex-col md:flex-row gap-8 md:gap-12 mt-10 md:mt-0">
           
-          {/* Code Section */}
-          <div className="w-full md:w-1/3 flex flex-col items-center justify-center bg-slate-950/40 rounded-[2rem] border border-white/5 p-8 shadow-inner shrink-0 text-center relative overflow-hidden">
-            <div className={`bg-blue-500/10 ${isSpectator ? 'text-blue-300' : 'text-blue-400'} border border-blue-500/20 px-4 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest mb-6 inline-flex items-center gap-2`}>
-              <Sparkles size={14}/> {isSpectator ? 'Spectating Room' : 'Waiting Area'}
-            </div>
-            
-            <p className="text-slate-500 font-bold tracking-[0.2em] uppercase mb-2 text-xs truncate max-w-[250px]">{displayRoomName}</p>
-            
-            {/* Monolithic Room Code */}
-            <h2 className="text-6xl md:text-7xl font-black font-mono tracking-widest text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.2)] mb-8 select-all bg-black/30 w-full py-4 rounded-2xl border border-white/5">
-              {roomCode}
-            </h2>
+          {/* Host Controls Section (Hidden for Joined Players) */}
+          {isHost && (
+            <div className="w-full md:w-1/3 flex flex-col items-center justify-center bg-slate-950/40 rounded-[2rem] border border-white/5 p-8 shadow-inner shrink-0 text-center relative overflow-hidden animate-in fade-in slide-in-from-left-4">
+              <div className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-4 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest mb-6 inline-flex items-center gap-2">
+                <Sparkles size={14}/> Waiting Area
+              </div>
+              
+              <p className="text-slate-500 font-bold tracking-[0.2em] uppercase mb-2 text-xs truncate max-w-[250px]">{displayRoomName}</p>
+              
+              <h2 className="text-6xl md:text-7xl font-black font-mono tracking-widest text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.2)] mb-8 select-all bg-black/30 w-full py-4 rounded-2xl border border-white/5">
+                {roomCode}
+              </h2>
 
-            <div className="w-full flex bg-black/60 p-1.5 rounded-2xl border border-white/10 shadow-inner overflow-hidden">
-               <input type="text" readOnly value={shareUrl} className="flex-1 bg-transparent text-slate-400 px-3 font-mono text-[10px] md:text-xs outline-none w-0" />
-               <button onClick={copyLink} className={`px-4 md:px-5 py-2.5 md:py-3 rounded-xl font-bold flex items-center gap-2 transition-all text-xs md:text-sm shrink-0 ${copySuccess ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
-                 {copySuccess ? <CheckCircle size={16} /> : <Copy size={16} />} {copySuccess ? 'Copied' : 'Copy'}
-               </button>
-            </div>
+              <div className="w-full flex bg-black/60 p-1.5 rounded-2xl border border-white/10 shadow-inner overflow-hidden">
+                 <input type="text" readOnly value={shareUrl} className="flex-1 bg-transparent text-slate-400 px-3 font-mono text-[10px] md:text-xs outline-none w-0" />
+                 <button onClick={copyLink} className={`px-4 md:px-5 py-2.5 md:py-3 rounded-xl font-bold flex items-center gap-2 transition-all text-xs md:text-sm shrink-0 ${copySuccess ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                   {copySuccess ? <CheckCircle size={16} /> : <Copy size={16} />} {copySuccess ? 'Copied' : 'Copy'}
+                 </button>
+              </div>
 
-            <div className="mt-8 w-full">
-               {isHost ? (
+              <div className="mt-8 w-full">
                  <div className="flex flex-col gap-3">
                    <button onClick={startMatch} disabled={isGeneratingLocations || playersList.length === 0} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 p-4 md:p-5 rounded-2xl font-black text-lg md:text-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] flex justify-center items-center gap-3 transition-transform active:scale-95 text-white">
                      {isGeneratingLocations ? <div className="w-5 h-5 md:w-6 md:h-6 border-4 border-white border-t-transparent rounded-full animate-spin" /> : <>START MATCH <ArrowRight size={20} /></>}
                    </button>
-                   {/* Conditionally Rendered Dev Button */}
                    {devMode && (
                      <button onClick={addTestBots} className="text-[10px] text-slate-500 hover:text-white uppercase tracking-widest transition-colors font-bold border border-slate-800 rounded-full py-1.5 px-4 w-max mx-auto hover:bg-slate-800">
                        [DEV] Add 40 Test Bots
                      </button>
                    )}
                  </div>
-               ) : <div className="w-full bg-white/5 border border-white/10 p-4 md:p-5 rounded-2xl text-center text-slate-400 font-bold flex justify-center items-center gap-3 text-sm md:text-base"><div className="w-3 h-3 md:w-4 md:h-4 rounded-full bg-blue-500 animate-pulse"></div> Waiting for host...</div>}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Players Section (Sleek Grid Layout) */}
-          <div className="w-full md:w-2/3 flex flex-col min-h-0">
+          {/* Players Section (Dynamically expands for non-hosts) */}
+          <div className={`w-full ${isHost ? 'md:w-2/3' : 'md:w-full'} flex flex-col min-h-0 transition-all duration-500`}>
+            
+            {/* Non-Host Waiting Banner */}
+            {!isHost && (
+               <div className="w-full bg-blue-600/10 border border-blue-500/20 p-4 md:p-6 rounded-2xl mb-6 flex flex-col items-center justify-center gap-2 animate-pulse shadow-inner relative overflow-hidden">
+                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10 mix-blend-overlay pointer-events-none"></div>
+                  <span className="text-slate-400 font-bold tracking-[0.2em] uppercase text-[10px] z-10">{displayRoomName}</span>
+                  <div className="flex items-center gap-3 z-10">
+                    <div className="w-3 h-3 rounded-full bg-blue-400 animate-ping"></div>
+                    <span className="text-blue-300 font-black tracking-widest uppercase text-sm md:text-xl drop-shadow-lg">Waiting for Host to Deploy...</span>
+                  </div>
+               </div>
+            )}
+
             <h3 className="text-lg md:text-xl font-black mb-3 md:mb-4 flex items-center justify-between shrink-0">
                <span className="flex items-center gap-3"><Users className="text-blue-400" /> Players Joined</span>
                <span className="bg-blue-600 px-3 py-1 rounded-full text-xs md:text-sm shadow-[0_0_15px_rgba(37,99,235,0.5)]">{playersList.length} / 100</span>
@@ -1213,6 +1260,25 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  // --- NEW: CINEMATIC COUNTDOWN VIEW ---
+  if (view === 'starting') {
+     return (
+       <div className="min-h-screen bg-[#050B14] flex flex-col items-center justify-center text-white relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-900/40 via-[#050B14] to-[#050B14] animate-pulse"></div>
+          <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] mix-blend-overlay"></div>
+          
+          <h2 className="text-xl md:text-3xl font-black text-indigo-400 tracking-[0.4em] uppercase mb-4 md:mb-8 z-10 flex items-center gap-3">
+             <Radar size={28} className="animate-spin" /> Deploying Operatives
+          </h2>
+          
+          {/* Animated Countdown Text */}
+          <div key={startCountdown} className="text-[150px] md:text-[250px] font-black leading-none z-10 text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 drop-shadow-[0_0_80px_rgba(79,70,229,0.8)] animate-in zoom-in-50 duration-500">
+            {startCountdown}
+          </div>
+       </div>
+     );
   }
 
   // --- 3. REVAMPED PLAYING VIEW ---
