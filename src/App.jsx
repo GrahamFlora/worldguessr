@@ -70,10 +70,13 @@ const KNOWN_LOCATIONS_WORLD = [
   {lat: 14.5995, lng: 120.9842}, {lat: 10.3157, lng: 123.8854}, {lat: 35.6762, lng: 139.6503},
   {lat: 37.5665, lng: 126.9780}, {lat: -37.8136, lng: 144.9631}, {lat: 34.0522, lng: -118.2437},
   {lat: 51.5074, lng: -0.1278}, {lat: 52.5200, lng: 13.4050}, {lat: -23.5505, lng: -46.6333},
-  {lat: -34.6037, lng: -58.3816}, {lat: -33.9249, lng: 18.4241}, {lat: 1.3521, lng: 103.8198}
+  {lat: -34.6037, lng: -58.3816}, {lat: -33.9249, lng: 18.4241}, {lat: 1.3521, lng: 103.8198},
+  {lat: 55.7558, lng: 37.6173}, {lat: -26.2041, lng: 28.0473}, {lat: 64.1466, lng: -21.9426},
+  {lat: 19.4326, lng: -99.1332}, {lat: 4.6097, lng: -74.0817}, {lat: -1.2921, lng: 36.8219},
+  {lat: 1.2903, lng: 103.8520}, {lat: -36.8485, lng: 174.7633}, {lat: 43.6510, lng: -79.3470}
 ];
 
-const getRandomStreetViewLocation = (svService, region = 'world', google, customCoord = null) => {
+const getRandomStreetViewLocation = (svService, region = 'world', google, customCoord = null, usedPanos = new Set()) => {
   return new Promise((resolve) => {
     let tries = 0;
     const attempt = () => {
@@ -92,19 +95,20 @@ const getRandomStreetViewLocation = (svService, region = 'world', google, custom
       } else {
         const pool = KNOWN_LOCATIONS_WORLD;
         const base = pool[Math.floor(Math.random() * pool.length)];
-        lat = base.lat + (Math.random() - 0.5) * 0.5;
-        lng = base.lng + (Math.random() - 0.5) * 0.5;
+        // Expand offset to roughly ~220km radius to get true randomness while avoiding deep oceans
+        lat = base.lat + (Math.random() - 0.5) * 4;
+        lng = base.lng + (Math.random() - 0.5) * 4;
       }
 
       svService.getPanorama({ 
         location: {lat, lng}, 
-        radius: customCoord ? 50000 : 50000, 
+        radius: customCoord ? 50000 : 150000, 
         source: google.maps.StreetViewSource.OUTDOOR 
       }, (data, status) => {
-        if (status === 'OK' && data && data.location && data.location.latLng) {
+        if (status === 'OK' && data && data.location && data.location.latLng && !usedPanos.has(data.location.pano)) {
           resolve({ lat: data.location.latLng.lat(), lng: data.location.latLng.lng(), pano: data.location.pano });
         } else {
-          if (tries < 35 && !customCoord) setTimeout(attempt, 10);
+          if (tries < 50 && !customCoord) setTimeout(attempt, 10);
           else if (customCoord) resolve({ lat: customCoord.lat, lng: customCoord.lng, pano: null }); // Fallback to raw map if no StreetView for custom coordinate
           else {
             const finalFallback = region === 'philippines' ? {lat: 14.5995, lng: 120.9842} : {lat: 48.8584, lng: 2.2945};
@@ -126,9 +130,27 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return 0;
 };
 
-const calculateScore = (distanceKm) => {
-  if (distanceKm <= 15) return 5000;
-  const score = 5000 * Math.exp(-distanceKm / 3000); 
+const getMapSize = (region, customLocations) => {
+  if (region === 'philippines') return 1800; // rough km span
+  if (region === 'custom' && customLocations && customLocations.length > 1) {
+    let maxD = 0;
+    for (let i = 0; i < customLocations.length; i++) {
+      for (let j = i + 1; j < customLocations.length; j++) {
+        const d = calculateDistance(customLocations[i].lat, customLocations[i].lng, customLocations[j].lat, customLocations[j].lng);
+        if (d > maxD) maxD = d;
+      }
+    }
+    return Math.max(10, maxD);
+  }
+  return 20000; // World map size roughly 20,000 km
+};
+
+const calculateScore = (distanceKm, mapSizeKm) => {
+  // 5k distance threshold: map size / 100,000, but never less than 25m (0.025 km)
+  const perfectThreshold = Math.max(0.025, mapSizeKm / 100000);
+  if (distanceKm <= perfectThreshold) return 5000;
+  
+  const score = 5000 * Math.exp(-10 * distanceKm / mapSizeKm); 
   return Math.max(0, Math.round(score));
 };
 
@@ -647,10 +669,14 @@ export default function App() {
       const google = await loadGoogleMaps();
       const svService = new google.maps.StreetViewService();
 
-      const locations = await Promise.all(Array.from({ length: numRounds }).map((_, i) => {
-          const customCoord = customLocations.length > 0 ? customLocations[i % customLocations.length] : null;
-          return getRandomStreetViewLocation(svService, region, google, customCoord);
-      }));
+      const locations = [];
+      const usedPanos = new Set();
+      for (let i = 0; i < numRounds; i++) {
+         const customCoord = customLocations.length > 0 ? customLocations[i % customLocations.length] : null;
+         const loc = await getRandomStreetViewLocation(svService, region, google, customCoord, usedPanos);
+         if (loc.pano) usedPanos.add(loc.pano);
+         locations.push(loc);
+      }
 
       const uid = user ? user.uid : 'solo';
       const finalName = playerName.trim() || 'Guest';
@@ -678,10 +704,14 @@ export default function App() {
       const matchNumRounds = roomData.settings?.numRounds || 5;
       const hostCustomLocs = roomData.settings?.customLocations || [];
 
-      const locations = await Promise.all(Array.from({ length: matchNumRounds }).map((_, i) => {
-          const customCoord = hostCustomLocs.length > 0 ? hostCustomLocs[i % hostCustomLocs.length] : null;
-          return getRandomStreetViewLocation(svService, matchRegion, google, customCoord);
-      }));
+      const locations = [];
+      const usedPanos = new Set();
+      for (let i = 0; i < matchNumRounds; i++) {
+         const customCoord = hostCustomLocs.length > 0 ? hostCustomLocs[i % hostCustomLocs.length] : null;
+         const loc = await getRandomStreetViewLocation(svService, matchRegion, google, customCoord, usedPanos);
+         if (loc.pano) usedPanos.add(loc.pano);
+         locations.push(loc);
+      }
 
       const playersObj = { ...(roomData.players || {}) }; // SAFE GUARD
       Object.keys(playersObj).forEach((uid) => { playersObj[uid].score = 0; });
@@ -699,7 +729,10 @@ export default function App() {
 
     const actualLoc = roomData.locations?.[roomData.currentRound] || { lat: 0, lng: 0 }; // SAFE GUARD
     const distance = finalGuess ? calculateDistance(finalGuess.lat, finalGuess.lng, actualLoc.lat, actualLoc.lng) : null;
-    const score = finalGuess ? calculateScore(distance) : 0;
+    
+    const mapSizeKm = getMapSize(roomData.settings?.region, roomData.settings?.customLocations);
+    const score = finalGuess ? calculateScore(distance, mapSizeKm) : 0;
+    
     const uid = isSinglePlayer ? Object.keys(roomData.players || {})[0] : user?.uid;
     const guessData = finalGuess ? { ...finalGuess, distance, score } : { lat: null, lng: null, distance, score, timeout: true };
 
@@ -830,6 +863,8 @@ export default function App() {
     const currentGuesses = roomData.guesses?.[roomData.currentRound] || {}; // SAFE GUARD
     const updates = {};
     
+    const mapSizeKm = getMapSize(roomData.settings?.region, roomData.settings?.customLocations);
+    
     let botsAdded = false;
     Object.keys(roomData.players || {}).forEach(pid => {
       if (pid.startsWith('bot_') && !currentGuesses[pid]) {
@@ -837,7 +872,7 @@ export default function App() {
         const lat = currentLoc.lat + (Math.random() - 0.5) * 60; 
         const lng = currentLoc.lng + (Math.random() - 0.5) * 60;
         const distance = calculateDistance(lat, lng, currentLoc.lat, currentLoc.lng);
-        const score = calculateScore(distance);
+        const score = calculateScore(distance, mapSizeKm);
         updates[`guesses.${roomData.currentRound}.${pid}`] = { lat, lng, distance, score };
         botsAdded = true;
       }
@@ -865,24 +900,24 @@ export default function App() {
              <p className="text-slate-400 text-sm md:text-base mb-8">You've been invited to room <span className="text-white font-mono font-black bg-white/10 px-2 py-1 rounded ml-1 tracking-widest">{inviteCode}</span></p>
 
              <div className="w-full space-y-4">
-               <div className="flex gap-4 items-center w-full">
-                  <div className="relative group shrink-0 w-14 h-14 md:w-16 md:h-16 rounded-2xl border-2 border-white/10 bg-slate-900 overflow-hidden shadow-inner hover:border-emerald-500/50 transition-all cursor-default">
-                     <img src={customAvatar || getAvatarUrl(avatarSeed)} alt="Avatar" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 group-hover:blur-sm" />
-                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        <button onClick={(e) => { e.preventDefault(); setAvatarSeed(Math.random().toString(36).substring(2,8)); setCustomAvatar(null); }} className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" title="Randomize Avatar">
-                           <RefreshCw size={12} />
-                        </button>
-                        <label className="p-1.5 bg-emerald-500/90 hover:bg-emerald-400 rounded-full text-white cursor-pointer transition-colors shadow-lg" title="Upload Avatar">
-                           <Upload size={12} />
-                           <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
-                        </label>
-                     </div>
+               <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 items-center w-full">
+                  <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl border-2 border-white/10 bg-slate-900 overflow-hidden shadow-inner transition-all">
+                     <img src={customAvatar || getAvatarUrl(avatarSeed)} alt="Avatar" className="w-full h-full object-cover" />
                   </div>
-                  <div className="relative flex-1">
+                  <div className="relative w-full">
                     <User size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input type="text" placeholder="Enter your nickname..." value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
                        className="w-full bg-slate-950/50 border border-white/5 rounded-2xl pl-12 pr-5 py-4 focus:outline-none focus:border-emerald-500/50 focus:bg-slate-900/80 focus:ring-2 focus:ring-emerald-500/20 text-white font-bold text-lg transition-all placeholder:text-slate-600 shadow-inner"
                      />
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5 col-start-1">
+                     <button onClick={(e) => { e.preventDefault(); setAvatarSeed(Math.random().toString(36).substring(2,8)); setCustomAvatar(null); }} className="text-slate-500 hover:text-white bg-slate-950/50 hover:bg-slate-800 border border-white/5 p-1.5 rounded-lg transition-colors" title="Randomize Avatar">
+                        <RefreshCw size={12} />
+                     </button>
+                     <label className="text-slate-500 hover:text-emerald-400 bg-slate-950/50 hover:bg-slate-800 border border-white/5 p-1.5 rounded-lg transition-colors cursor-pointer" title="Upload Custom Avatar">
+                        <Upload size={12} />
+                        <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                     </label>
                   </div>
                </div>
                
@@ -938,23 +973,23 @@ export default function App() {
                 <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.15em] mb-3 ml-1 group-focus-within:text-blue-400 transition-colors flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50 group-focus-within:bg-blue-400 group-focus-within:shadow-[0_0_10px_rgba(96,165,250,0.8)] transition-all"></span> Player Identity
                 </p>
-                <div className="flex gap-4 items-center w-full">
-                  <div className="relative group shrink-0 w-14 h-14 md:w-16 md:h-16 rounded-2xl border-2 border-white/10 bg-slate-900 overflow-hidden shadow-inner hover:border-blue-500/50 transition-all cursor-default">
-                     <img src={customAvatar || getAvatarUrl(avatarSeed)} alt="Avatar" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 group-hover:blur-sm" />
-                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        <button onClick={(e) => { e.preventDefault(); setAvatarSeed(Math.random().toString(36).substring(2,8)); setCustomAvatar(null); }} className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" title="Randomize Avatar">
-                           <RefreshCw size={12} />
-                        </button>
-                        <label className="p-1.5 bg-blue-500/90 hover:bg-blue-400 rounded-full text-white cursor-pointer transition-colors shadow-lg" title="Upload Avatar">
-                           <Upload size={12} />
-                           <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
-                        </label>
-                     </div>
+                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 items-center w-full">
+                  <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl border-2 border-white/10 bg-slate-900 overflow-hidden shadow-inner transition-all">
+                     <img src={customAvatar || getAvatarUrl(avatarSeed)} alt="Avatar" className="w-full h-full object-cover" />
                   </div>
-                  <div className="relative flex-1">
+                  <div className="relative w-full">
                     <input type="text" placeholder="Enter Nickname..." value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
                       className="w-full bg-slate-950/50 border border-white/5 rounded-2xl px-5 py-4 focus:outline-none focus:border-blue-500/50 focus:bg-slate-900/80 focus:ring-2 focus:ring-blue-500/20 text-white font-bold text-lg transition-all placeholder:text-slate-600 shadow-inner"
                     />
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5 col-start-1">
+                     <button onClick={(e) => { e.preventDefault(); setAvatarSeed(Math.random().toString(36).substring(2,8)); setCustomAvatar(null); }} className="text-slate-500 hover:text-white bg-slate-950/50 hover:bg-slate-800 border border-white/5 p-1.5 rounded-lg transition-colors" title="Randomize Avatar">
+                        <RefreshCw size={12} />
+                     </button>
+                     <label className="text-slate-500 hover:text-blue-400 bg-slate-950/50 hover:bg-slate-800 border border-white/5 p-1.5 rounded-lg transition-colors cursor-pointer" title="Upload Custom Avatar">
+                        <Upload size={12} />
+                        <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                     </label>
                   </div>
                 </div>
               </div>
@@ -1221,9 +1256,9 @@ export default function App() {
            </div>
         )}
 
-        {/* --- Top Target Locked Banner - Pushed slightly down and smaller --- */}
+        {/* --- Top Target Locked Banner - Dynamic Position based on Time --- */}
         {hasGuessed && (
-          <div className="absolute top-16 md:top-20 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none animate-in slide-in-from-top-8 duration-500">
+          <div className={`absolute ${roomData.settings?.timeLimit > 0 ? 'top-16 md:top-20' : 'top-4 md:top-6'} left-1/2 transform -translate-x-1/2 z-30 pointer-events-none animate-in slide-in-from-top-8 duration-500`}>
              <div className="bg-emerald-900/90 backdrop-blur-2xl border border-emerald-400/50 px-4 py-1.5 md:px-6 md:py-2 rounded-full shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center gap-2">
                 <CheckCircle size={16} className="md:w-5 md:h-5 text-emerald-400" />
                 <div className="flex flex-col">
