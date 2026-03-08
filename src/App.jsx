@@ -714,9 +714,11 @@ export default function App() {
       const google = await loadGoogleMaps();
       const svService = new google.maps.StreetViewService();
       
-      const matchRegion = roomData.settings?.region || 'world';
-      const matchNumRounds = roomData.settings?.numRounds || 5;
-      const hostCustomLocs = roomData.settings?.customLocations || [];
+      // Use local component state so the host can freely modify settings in the lobby before starting
+      const matchRegion = region;
+      const matchNumRounds = numRounds;
+      const matchTimeLimit = timeLimit;
+      const hostCustomLocs = customLocations;
 
       const locations = [];
       const usedPanos = new Set();
@@ -730,8 +732,15 @@ export default function App() {
       const playersObj = { ...(roomData.players || {}) }; // SAFE GUARD
       Object.keys(playersObj).forEach((uid) => { playersObj[uid].score = 0; });
       
-      // Update DB to "starting" to trigger countdown on all clients
-      await updateDoc(getRoomRef(roomCode), { status: 'starting', locations, currentRound: 0, players: playersObj, guesses: {} });
+      // Update DB to "starting" to trigger countdown, and push the new settings to the room!
+      await updateDoc(getRoomRef(roomCode), { 
+          status: 'starting', 
+          locations, 
+          currentRound: 0, 
+          players: playersObj, 
+          guesses: {},
+          settings: { numRounds: matchNumRounds, timeLimit: matchTimeLimit, region: matchRegion, customLocations: hostCustomLocs }
+      });
       
       setHideUI(false);
       setFocusedPlayerId(null);
@@ -877,18 +886,26 @@ export default function App() {
     }
   }, [view, roomData?.currentRound]); // Only run when round changes or view changes
 
-  // Host Fail-safe Timer (Forces the transition when time runs out)
+  // Global Fail-safe Timer (Forces the transition when time runs out, works even if a player disconnects)
   useEffect(() => {
-    const isHost = roomData?.hostId === user?.uid;
-    if (view === 'playing' && roomData && isHost && !isSinglePlayer && (roomData.settings?.timeLimit || 0) > 0) {
+    if (view === 'playing' && roomData && !isSinglePlayer && (roomData.settings?.timeLimit || 0) > 0) {
       const fallbackTimer = setTimeout(() => {
-        if (roomDataRef.current?.status === 'playing') {
-          updateDoc(getRoomRef(roomCode), { status: 'round_result' });
+        const currentRoom = roomDataRef.current;
+        if (currentRoom?.status === 'playing') {
+          const currentGuesses = currentRoom.guesses?.[currentRoom.currentRound] || {};
+          const updatedPlayers = { ...(currentRoom.players || {}) };
+          
+          // Ensure scores are processed for anyone who DID guess before the timeout
+          Object.entries(currentGuesses).forEach(([uid, guess]) => {
+             if (updatedPlayers[uid]) updatedPlayers[uid].score += guess.score;
+          });
+          
+          updateDoc(getRoomRef(roomCode), { status: 'round_result', players: updatedPlayers }).catch(e=>console.log(e));
         }
       }, (roomData.settings.timeLimit + 3) * 1000); // 3 seconds grace period for late network syncs
       return () => clearTimeout(fallbackTimer);
     }
-  }, [view, roomData?.currentRound, user?.uid, isSinglePlayer, roomCode]);
+  }, [view, roomData?.currentRound, isSinglePlayer, roomCode]);
 
   // --- MOCKUP DEVELOPMENT TOOLS ---
   const addTestBots = async () => {
@@ -1227,14 +1244,47 @@ export default function App() {
                 {roomCode}
               </h2>
 
-              <div className="w-full flex bg-black/60 p-1.5 rounded-2xl border border-white/10 shadow-inner overflow-hidden">
+              <div className="w-full flex bg-black/60 p-1.5 rounded-2xl border border-white/10 shadow-inner overflow-hidden mb-6">
                  <input type="text" readOnly value={shareUrl} className="flex-1 bg-transparent text-slate-400 px-3 font-mono text-[10px] md:text-xs outline-none w-0" />
                  <button onClick={copyLink} className={`px-4 md:px-5 py-2.5 md:py-3 rounded-xl font-bold flex items-center gap-2 transition-all text-xs md:text-sm shrink-0 ${copySuccess ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
                    {copySuccess ? <CheckCircle size={16} /> : <Copy size={16} />} {copySuccess ? 'Copied' : 'Copy'}
                  </button>
               </div>
 
-              <div className="mt-8 w-full">
+              {/* Quick Settings Editor for Host */}
+              <div className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 mb-6 flex flex-col gap-3">
+                 <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-left">Mission Parameters</h4>
+                 <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <select value={numRounds} onChange={(e) => setNumRounds(Number(e.target.value))} className="flex-1 bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white font-bold focus:outline-none focus:border-blue-500">
+                         <option value={5}>5 Rounds</option>
+                         <option value={10}>10 Rounds</option>
+                         <option value={15}>15 Rounds</option>
+                         <option value={20}>20 Rounds</option>
+                         <option value={30}>30 Rounds</option>
+                      </select>
+                      <select value={timeLimit} onChange={(e) => setTimeLimit(Number(e.target.value))} className="flex-1 bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white font-bold focus:outline-none focus:border-blue-500">
+                         <option value={15}>15s Timer</option>
+                         <option value={30}>30s Timer</option>
+                         <option value={45}>45s Timer</option>
+                         <option value={60}>60s Timer</option>
+                         <option value={0}>Unlimited</option>
+                      </select>
+                    </div>
+                    <select value={region} onChange={(e) => setRegion(e.target.value)} className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white font-bold focus:outline-none focus:border-blue-500">
+                       <option value="world">🗺️ World Drop</option>
+                       <option value="philippines">📍 Philippines</option>
+                       <option value="custom">📌 Custom Pins</option>
+                    </select>
+                    {region === 'custom' && (
+                       <div className="mt-2 text-left">
+                         <CustomMapSelector locations={customLocations} setLocations={setCustomLocations} maxRounds={numRounds} />
+                       </div>
+                    )}
+                 </div>
+              </div>
+
+              <div className="w-full">
                  <div className="flex flex-col gap-3">
                    <button onClick={startMatch} disabled={isGeneratingLocations || playersList.length === 0} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 p-4 md:p-5 rounded-2xl font-black text-lg md:text-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] flex justify-center items-center gap-3 transition-transform active:scale-95 text-white">
                      {isGeneratingLocations ? <div className="w-5 h-5 md:w-6 md:h-6 border-4 border-white border-t-transparent rounded-full animate-spin" /> : <>START MATCH <ArrowRight size={20} /></>}
@@ -1354,11 +1404,6 @@ export default function App() {
         {/* Top Left HUD - Made Smaller & Controlled by hideUI */}
         <div className={`absolute top-4 md:top-6 left-4 md:left-6 z-20 pointer-events-none flex flex-col items-start gap-2 transition-opacity duration-300 ${hideUI ? 'opacity-0' : 'opacity-100'}`}>
            <div className="flex items-center gap-2 md:gap-3 pointer-events-auto">
-             {/* Quick Exit / Abort Match Button (Made more obvious) */}
-             <button onClick={handleExit} className="bg-red-500/20 backdrop-blur-xl border border-red-500/50 hover:bg-red-500/40 text-red-200 hover:text-white p-2 md:p-3 rounded-xl md:rounded-2xl transition-all shadow-2xl flex items-center justify-center gap-2 group" title="Quit Operation">
-               <Home size={16} className="md:w-5 md:h-5" />
-               <span className="text-[10px] md:text-xs font-black uppercase tracking-widest hidden sm:block group-hover:block pr-1">Flee</span>
-             </button>
              
              {/* Round Info Pill */}
              <div className="bg-black/60 backdrop-blur-xl border border-white/10 px-2 py-1.5 md:px-3 md:py-2 rounded-xl md:rounded-2xl flex items-center gap-2 md:gap-3 shadow-2xl">
