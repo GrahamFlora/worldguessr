@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { Globe, Users, Trophy, ArrowRight, Home, Map as MapIcon, Minimize2, Copy, CheckCircle, RotateCcw, User, Clock, MapPin, List, X, ChevronRight, Sparkles, Eye, EyeOff, Navigation, Search, Radar } from 'lucide-react';
+import { Globe, Users, Trophy, ArrowRight, Home, Map as MapIcon, Minimize2, Copy, CheckCircle, RotateCcw, User, Clock, MapPin, List, X, ChevronRight, Sparkles, Eye, EyeOff, Navigation, Search, Radar, ShieldAlert, Target, RefreshCw, Upload } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GOOGLE_MAPS_API_KEY = "AIzaSyClIIqqJnkI-7BviXgT4oB44nBtSF6FkNI"; 
@@ -73,8 +73,6 @@ const KNOWN_LOCATIONS_WORLD = [
   {lat: -34.6037, lng: -58.3816}, {lat: -33.9249, lng: 18.4241}, {lat: 1.3521, lng: 103.8198}
 ];
 
-const PH_BOUNDS = { minLat: 4.5, maxLat: 21.5, minLng: 116.0, maxLng: 127.0 };
-
 const getRandomStreetViewLocation = (svService, region = 'world', google, customCoord = null) => {
   return new Promise((resolve) => {
     let tries = 0;
@@ -86,8 +84,11 @@ const getRandomStreetViewLocation = (svService, region = 'world', google, custom
         lat = customCoord.lat;
         lng = customCoord.lng;
       } else if (region === 'philippines') {
-        lat = PH_BOUNDS.minLat + Math.random() * (PH_BOUNDS.maxLat - PH_BOUNDS.minLat);
-        lng = PH_BOUNDS.minLng + Math.random() * (PH_BOUNDS.maxLng - PH_BOUNDS.minLng);
+        // Precise bounds to include Balabac (Lat 7.9+) & Tawi-Tawi (Lng 119.8+) while strictly excluding Sabah, Malaysia
+        do {
+           lat = 4.5 + Math.random() * (21.5 - 4.5);
+           lng = 116.8 + Math.random() * (127.0 - 116.8);
+        } while (lat < 7.8 && lng < 119.5); 
       } else {
         const pool = KNOWN_LOCATIONS_WORLD;
         const base = pool[Math.floor(Math.random() * pool.length)];
@@ -131,7 +132,7 @@ const calculateScore = (distanceKm) => {
   return Math.max(0, Math.round(score));
 };
 
-const getAvatarUrl = (seed) => `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(seed)}&backgroundColor=0f172a&radius=50`;
+const getAvatarUrl = (seed) => `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(seed)}&backgroundColor=0f172a&radius=50`;
 const generateRoomCode = () => Math.random().toString(36).substring(2, 6).toUpperCase();
 const getPlayerColor = (index, totalPlayers) => `hsl(${Math.floor((index / (totalPlayers || 1)) * 360)}, 85%, 60%)`;
 
@@ -160,7 +161,7 @@ const StreetView = ({ location }) => {
     return () => { isMounted = false; };
   }, [location]);
 
-  return <div ref={containerRef} className="w-full h-full bg-slate-950 focus:outline-none" tabIndex="0" style={{ pointerEvents: 'auto' }} />;
+  return <div ref={containerRef} className="w-full h-full bg-slate-950 focus:outline-none" tabIndex="0" style={{ pointerEvents: 'auto', touchAction: 'none', overscrollBehavior: 'none' }} />;
 };
 
 const GoogleMapCanvas = ({ interactable, actualLocation, guesses, activeGuess, activeGuessAvatar, onGuessChange, isExpanded }) => {
@@ -356,7 +357,7 @@ const CustomMapSelector = ({ locations, setLocations, maxRounds }) => {
 
   return (
     <div className="w-full relative group flex flex-col gap-3">
-      <div className="w-full h-48 md:h-64 rounded-xl overflow-hidden relative shadow-inner border border-white/10 group">
+      <div className="w-full h-48 md:h-64 rounded-2xl overflow-hidden relative shadow-inner border border-white/10 group">
         <div ref={mapContainerRef} className="absolute inset-0 bg-[#e3f0f7]" />
         {locations.length >= maxRounds && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-3 py-1 rounded-full z-10 shadow-lg animate-in slide-in-from-top-2">
@@ -380,13 +381,13 @@ const CustomMapSelector = ({ locations, setLocations, maxRounds }) => {
       {/* Advanced Text/Geocode Search Box */}
       <div className="flex gap-2">
          <div className="relative flex-1">
-           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+           <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
            <input type="text" placeholder="Search city, country or paste GPS (lat, lng)..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchLocation()}
-             className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white font-medium text-xs md:text-sm transition-all placeholder:text-slate-500 shadow-inner"
+             className="w-full bg-slate-900/50 border border-white/10 rounded-2xl pl-12 pr-4 py-3.5 focus:outline-none focus:border-indigo-500 focus:bg-slate-900/80 focus:ring-1 focus:ring-indigo-500 text-white font-medium text-xs md:text-sm transition-all placeholder:text-slate-500 shadow-inner"
            />
          </div>
          <button onClick={handleSearchLocation} disabled={isSearching || locations.length >= maxRounds}
-           className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white px-4 md:px-6 rounded-xl font-bold shadow-lg transition-all active:scale-95 text-xs md:text-sm flex items-center gap-2">
+           className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white px-4 md:px-6 rounded-2xl font-bold shadow-lg transition-all active:scale-95 text-xs md:text-sm flex items-center gap-2">
            {isSearching ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : "Add Pin"}
          </button>
       </div>
@@ -395,196 +396,43 @@ const CustomMapSelector = ({ locations, setLocations, maxRounds }) => {
   );
 };
 
-// --- INTERACTIVE LOBBY AVATARS ---
-const BouncingAvatars = ({ players }) => {
-  const containerRef = useRef(null);
-  const avatarsRef = useRef({});
-  const physicsRef = useRef({});
-  const mouseRef = useRef({ x: -1000, y: -1000, active: false });
-
-  // Dynamic sizing based on player count to support 70+ players
-  const isCrowded = players.length > 30;
-  const currentRadius = isCrowded ? 16 : 24; // 32px vs 48px diameter
-  const avatarSizeClass = isCrowded ? 'w-8 h-8' : 'w-12 h-12';
-
-  useEffect(() => {
-     // Initialize new players safely
-     players.forEach(p => {
-       if (!physicsRef.current[p.id]) {
-          physicsRef.current[p.id] = {
-             x: Math.random() * 300 + 20, // Spread them out more initially
-             y: Math.random() * 200 + 20,
-             vx: (Math.random() - 0.5) * 6,
-             vy: (Math.random() - 0.5) * 6,
-             radius: currentRadius
-          };
-       }
-     });
-     
-     // Cleanup removed players & Update Radius dynamically
-     const currentIds = new Set(players.map(p => p.id));
-     Object.keys(physicsRef.current).forEach(id => {
-        if (!currentIds.has(id)) {
-           delete physicsRef.current[id];
-           delete avatarsRef.current[id];
-        } else {
-           physicsRef.current[id].radius = currentRadius;
-        }
-     });
-  }, [players, currentRadius]);
-
-  useEffect(() => {
-    let animationFrameId;
-    const update = () => {
-       const container = containerRef.current;
-       if (!container) return;
-       const rect = container.getBoundingClientRect();
-       const width = rect.width;
-       const height = rect.height;
-
-       const physics = physicsRef.current;
-       const keys = Object.keys(physics);
-
-       keys.forEach(key => {
-          const p = physics[key];
-
-          // Mouse repel force
-          if (mouseRef.current.active) {
-             const dx = p.x + p.radius - mouseRef.current.x;
-             const dy = p.y + p.radius - mouseRef.current.y;
-             const dist = Math.sqrt(dx*dx + dy*dy);
-             if (dist < 150) { // Increased repel radius for larger area
-                const force = (150 - dist) / 150;
-                p.vx += (dx / dist) * force * 2.5;
-                p.vy += (dy / dist) * force * 2.5;
-             }
-          }
-
-          // Apply velocity
-          p.x += p.vx;
-          p.y += p.vy;
-
-          // Friction (slight damping)
-          p.vx *= 0.99;
-          p.vy *= 0.99;
-          
-          // Base speed minimum to keep them moving
-          const speed = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
-          if (speed < 1.2) {
-             p.vx *= 1.05;
-             p.vy *= 1.05;
-          }
-
-          // Boundary Collision
-          if (p.x <= 0) { p.x = 0; p.vx *= -1; }
-          if (p.x >= width - p.radius * 2) { p.x = width - p.radius * 2; p.vx *= -1; }
-          if (p.y <= 0) { p.y = 0; p.vy *= -1; }
-          if (p.y >= height - p.radius * 2) { p.y = height - p.radius * 2; p.vy *= -1; }
-       });
-
-       // Circle Collision (Avatars bouncing off each other)
-       for (let i = 0; i < keys.length; i++) {
-          for (let j = i + 1; j < keys.length; j++) {
-             const p1 = physics[keys[i]];
-             const p2 = physics[keys[j]];
-             const dx = (p1.x + p1.radius) - (p2.x + p2.radius);
-             const dy = (p1.y + p1.radius) - (p2.y + p2.radius);
-             const dist = Math.sqrt(dx*dx + dy*dy);
-             const minDist = p1.radius + p2.radius;
-             
-             if (dist < minDist && dist > 0) {
-                const angle = Math.atan2(dy, dx);
-                const overlap = minDist - dist;
-                
-                // Push apart
-                p1.x += Math.cos(angle) * overlap * 0.5;
-                p1.y += Math.sin(angle) * overlap * 0.5;
-                p2.x -= Math.cos(angle) * overlap * 0.5;
-                p2.y -= Math.sin(angle) * overlap * 0.5;
-                
-                // Elastic Bounce
-                const nx = dx / dist;
-                const ny = dy / dist;
-                const p1n = p1.vx * nx + p1.vy * ny;
-                const p2n = p2.vx * nx + p2.vy * ny;
-                const dp = p1n - p2n;
-                
-                p1.vx -= dp * nx;
-                p1.vy -= dp * ny;
-                p2.vx += dp * nx;
-                p2.vy += dp * ny;
-             }
-          }
-       }
-
-       // DOM Update
-       keys.forEach(key => {
-          const el = avatarsRef.current[key];
-          if (el) el.style.transform = `translate(${physics[key].x}px, ${physics[key].y}px)`;
-       });
-
-       animationFrameId = requestAnimationFrame(update);
-    };
-    update();
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [players]);
-
-  const handleMouseMove = (e) => {
-     const rect = containerRef.current.getBoundingClientRect();
-     mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top, active: true };
-  };
-  
-  const handleMouseLeave = () => { mouseRef.current.active = false; };
-
-  const handleTouchMove = (e) => {
-     if (!e.touches[0]) return;
-     const rect = containerRef.current.getBoundingClientRect();
-     mouseRef.current = { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top, active: true };
-  };
-
+// --- SLEEK TACTICAL LOBBY GRID (Replaces Bouncing Avatars) ---
+const OperativeGrid = ({ players }) => {
   return (
-     <div 
-        ref={containerRef} 
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleMouseLeave}
-        className="w-full flex-1 min-h-[350px] md:min-h-[450px] border border-blue-500/20 rounded-3xl bg-slate-950 shadow-[inset_0_0_50px_rgba(0,0,0,0.8)] relative overflow-hidden group cursor-crosshair"
-     >
-        {/* Tactical Satellite Picture Background */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-50 mix-blend-screen">
-           <img 
-              src="https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop" 
-              alt="Tactical Earth View" 
-              className="w-full h-full object-cover grayscale brightness-50 contrast-125" 
-           />
-           {/* Dark fade gradients to blend the edges smoothly */}
-           <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950 opacity-80"></div>
-           <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-transparent to-slate-950 opacity-80"></div>
+     <div className="w-full flex-1 min-h-[350px] md:min-h-[450px] border border-white/10 rounded-[2rem] bg-[#020617] shadow-[inset_0_0_80px_rgba(0,0,0,0.8)] relative overflow-hidden group">
+        
+        {/* Clean Deep-Tech Gradient Background */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+           <div className="absolute -top-[20%] -left-[10%] w-[70%] h-[70%] bg-blue-600/10 blur-[100px] rounded-full mix-blend-screen"></div>
+           <div className="absolute -bottom-[20%] -right-[10%] w-[70%] h-[70%] bg-indigo-600/10 blur-[100px] rounded-full mix-blend-screen"></div>
         </div>
 
         {/* Subtle Tech Grid Overlay */}
-        <div className="absolute inset-0 pointer-events-none opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] mix-blend-overlay"></div>
+        <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] mix-blend-overlay"></div>
         
-        {players.map(p => (
-           <div
-              key={p.id}
-              ref={el => avatarsRef.current[p.id] = el}
-              className={`absolute top-0 left-0 ${avatarSizeClass} rounded-full border-2 bg-slate-900 shadow-[0_0_20px_rgba(0,0,0,0.8)] flex items-center justify-center group/avatar hover:z-50 will-change-transform`}
-              style={{ borderColor: p.color }}
-           >
-              <img src={p.avatar} alt={p.name} className="w-full h-full rounded-full pointer-events-none" />
-              <div className={`absolute ${isCrowded ? '-bottom-5 text-[8px]' : '-bottom-6 text-[10px]'} bg-black/90 text-white font-bold px-2 py-0.5 rounded opacity-0 group-hover/avatar:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10 z-50`}>
-                 {p.name}
+        {/* Players Layout Grid */}
+        <div className="absolute inset-0 z-10 p-6 md:p-8 overflow-y-auto custom-scrollbar flex flex-wrap gap-4 md:gap-6 content-start justify-center">
+           {players.map(p => (
+              <div key={p.id} className="bg-slate-900/70 backdrop-blur-md border border-white/10 p-2 pr-5 rounded-full flex items-center gap-3 md:gap-4 animate-in fade-in zoom-in-95 duration-300 shadow-[0_0_20px_rgba(0,0,0,0.5)] hover:bg-slate-800 transition-colors">
+                 <div className="relative">
+                    <img src={p.avatar} alt={p.name} className="w-10 h-10 md:w-12 md:h-12 rounded-full border-2 bg-slate-950 object-cover" style={{ borderColor: p.color }} />
+                    <div className="absolute inset-0 rounded-full border-2 animate-ping opacity-20" style={{ borderColor: p.color }}></div>
+                 </div>
+                 <span className="font-bold text-xs md:text-sm tracking-wide text-slate-200">{p.name}</span>
               </div>
-           </div>
-        ))}
-        {players.length === 0 && <div className="absolute inset-0 flex items-center justify-center text-blue-500/80 font-black text-sm md:text-xl tracking-[0.3em] uppercase pointer-events-none drop-shadow-lg">Scanning for Operatives...</div>}
-        {players.length > 0 && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-blue-300/60 text-[10px] uppercase tracking-[0.2em] pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity font-bold bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm border border-white/5">Hover/Drag to repel</div>}
+           ))}
+           {players.length === 0 && (
+              <div className="w-full h-full flex items-center justify-center">
+                 <div className="text-blue-500/50 font-black text-sm md:text-xl tracking-[0.3em] uppercase animate-pulse drop-shadow-lg flex flex-col items-center gap-4">
+                    <Users size={48} className="opacity-50" />
+                    Waiting for Operatives...
+                 </div>
+              </div>
+           )}
+        </div>
      </div>
   );
 };
-
 
 // --- MAIN APP COMPONENT ---
 export default function App() {
@@ -606,6 +454,10 @@ export default function App() {
   const [isGeneratingLocations, setIsGeneratingLocations] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   
+  // Custom Avatar State
+  const [customAvatar, setCustomAvatar] = useState(null);
+  const [avatarSeed, setAvatarSeed] = useState(() => Math.random().toString(36).substring(2, 8));
+
   // Game Settings
   const [numRounds, setNumRounds] = useState(5);
   const [timeLimit, setTimeLimit] = useState(60); 
@@ -620,6 +472,9 @@ export default function App() {
   const [matchHistory, setMatchHistory] = useState([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedHistoryRound, setSelectedHistoryRound] = useState(null);
+  
+  // Interactive Results State
+  const [focusedPlayerId, setFocusedPlayerId] = useState(null);
 
   const timerIntervalRef = useRef(null);
   const activeGuessRef = useRef(null);
@@ -659,6 +514,34 @@ export default function App() {
     loadGoogleMaps().catch(e => console.error("Prefetch Map Failed:", e));
     return () => unsubscribe();
   }, []);
+
+  // --- AVATAR UPLOAD COMPRESSOR ---
+  const handleAvatarUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 128; // Compressed size for Firebase limits
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+        } else {
+          if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        setCustomAvatar(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     if (!user || !roomCode || isSinglePlayer) return;
@@ -710,7 +593,7 @@ export default function App() {
     
     const finalName = playerName.trim() || 'Host';
     const initialPlayers = hostWillPlay 
-      ? { [user.uid]: { name: finalName.substring(0, 15), avatar: getAvatarUrl(user.uid), score: 0, color: getPlayerColor(0, 1) } }
+      ? { [user.uid]: { name: finalName.substring(0, 15), avatar: customAvatar || getAvatarUrl(avatarSeed), score: 0, color: getPlayerColor(0, 1) } }
       : {};
 
     try {
@@ -724,6 +607,7 @@ export default function App() {
       setRoomCode(code);
       setView('lobby');
       setMatchHistory([]);
+      setFocusedPlayerId(null);
     } catch (err) { 
       setErrorMsg("Host Error: Check Permissions."); 
     } finally { setIsJoining(false); }
@@ -742,10 +626,11 @@ export default function App() {
       } else {
         const data = snap.data();
         const finalName = playerName.trim() || 'Operative';
-        await updateDoc(roomRef, { [`players.${user.uid}`]: { name: finalName.substring(0, 15), avatar: getAvatarUrl(user.uid), score: 0, color: getPlayerColor(Object.keys(data.players || {}).length, 8) } });
+        await updateDoc(roomRef, { [`players.${user.uid}`]: { name: finalName.substring(0, 15), avatar: customAvatar || getAvatarUrl(avatarSeed), score: 0, color: getPlayerColor(Object.keys(data.players || {}).length, 8) } });
         setRoomCode(codeToJoin);
         setInviteCode(''); 
         setView('lobby');
+        setFocusedPlayerId(null);
       }
     } catch (e) { setErrorMsg('Join Error.'); }
     setIsJoining(false);
@@ -757,6 +642,7 @@ export default function App() {
      setIsSinglePlayer(true);
      setMatchHistory([]);
      setSelectedHistoryRound(null);
+     setFocusedPlayerId(null);
      try {
       const google = await loadGoogleMaps();
       const svService = new google.maps.StreetViewService();
@@ -771,7 +657,7 @@ export default function App() {
       setRoomData({
          status: 'playing', hostId: uid, 
          settings: { numRounds, timeLimit, region },
-         players: { [uid]: { name: finalName, avatar: getAvatarUrl(uid), score: 0, color: '#3b82f6' } },
+         players: { [uid]: { name: finalName, avatar: customAvatar || getAvatarUrl(avatarSeed), score: 0, color: '#3b82f6' } },
          locations, currentRound: 0, guesses: {}
       });
       setView('playing');
@@ -801,6 +687,7 @@ export default function App() {
       Object.keys(playersObj).forEach((uid) => { playersObj[uid].score = 0; });
       await updateDoc(getRoomRef(roomCode), { status: 'playing', locations, currentRound: 0, players: playersObj, guesses: {} });
       setHideUI(false);
+      setFocusedPlayerId(null);
     } catch (err) { setErrorMsg("Match Start Failed."); } finally { setIsGeneratingLocations(false); }
   };
 
@@ -845,6 +732,7 @@ export default function App() {
     setActiveGuess(null);
     setIsMapExpanded(false);
     setHideUI(false);
+    setFocusedPlayerId(null);
   };
 
   const returnToLobby = async () => {
@@ -858,6 +746,7 @@ export default function App() {
       guesses: {},
       locations: []
     });
+    setFocusedPlayerId(null);
   };
 
   const handleExit = () => {
@@ -868,6 +757,7 @@ export default function App() {
     setActiveGuess(null);
     setIsMapExpanded(false);
     setHideUI(false);
+    setFocusedPlayerId(null);
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     window.location.hash = '';
     setInviteCode('');
@@ -975,11 +865,25 @@ export default function App() {
              <p className="text-slate-400 text-sm md:text-base mb-8">You've been invited to room <span className="text-white font-mono font-black bg-white/10 px-2 py-1 rounded ml-1 tracking-widest">{inviteCode}</span></p>
 
              <div className="w-full space-y-4">
-               <div className="relative">
-                 <User size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                 <input type="text" placeholder="Enter your nickname..." value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl pl-12 pr-5 py-4 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-white font-bold text-lg transition-all placeholder:text-slate-600 shadow-inner"
-                  />
+               <div className="flex gap-4 items-center w-full">
+                  <div className="relative group shrink-0 w-14 h-14 md:w-16 md:h-16 rounded-2xl border-2 border-white/10 bg-slate-900 overflow-hidden shadow-inner hover:border-emerald-500/50 transition-all cursor-default">
+                     <img src={customAvatar || getAvatarUrl(avatarSeed)} alt="Avatar" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 group-hover:blur-sm" />
+                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <button onClick={(e) => { e.preventDefault(); setAvatarSeed(Math.random().toString(36).substring(2,8)); setCustomAvatar(null); }} className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" title="Randomize Avatar">
+                           <RefreshCw size={12} />
+                        </button>
+                        <label className="p-1.5 bg-emerald-500/90 hover:bg-emerald-400 rounded-full text-white cursor-pointer transition-colors shadow-lg" title="Upload Avatar">
+                           <Upload size={12} />
+                           <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                        </label>
+                     </div>
+                  </div>
+                  <div className="relative flex-1">
+                    <User size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input type="text" placeholder="Enter your nickname..." value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
+                       className="w-full bg-slate-950/50 border border-white/5 rounded-2xl pl-12 pr-5 py-4 focus:outline-none focus:border-emerald-500/50 focus:bg-slate-900/80 focus:ring-2 focus:ring-emerald-500/20 text-white font-bold text-lg transition-all placeholder:text-slate-600 shadow-inner"
+                     />
+                  </div>
                </div>
                
                <button onClick={joinRoom} disabled={!user || isJoining} 
@@ -1027,27 +931,48 @@ export default function App() {
                {!user && <div className="mt-6 px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-400 animate-ping"></div><span className="text-[10px] text-blue-300 font-bold uppercase tracking-widest">Connecting...</span></div>}
             </div>
 
-            {/* Profile & Fast Join (Adjusted h-fit to prevent over-stretching) */}
-            <div className="bg-slate-900/60 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-6 shadow-2xl flex flex-col gap-6 shrink-0 h-fit">
+            {/* Profile & Fast Join (Polished Glassmorphism) */}
+            <div className="bg-slate-900/60 backdrop-blur-3xl border border-white/5 rounded-[2rem] p-8 shadow-2xl flex flex-col gap-8 shrink-0 h-fit">
               
               <div className="group">
-                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2 ml-2 group-focus-within:text-blue-400 transition-colors flex items-center gap-2"><User size={12}/> Player Identity</p>
-                <div className="relative">
-                  <input type="text" placeholder="Enter Nickname..." value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-white font-bold text-lg transition-all placeholder:text-slate-600 shadow-inner"
-                  />
+                <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.15em] mb-3 ml-1 group-focus-within:text-blue-400 transition-colors flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50 group-focus-within:bg-blue-400 group-focus-within:shadow-[0_0_10px_rgba(96,165,250,0.8)] transition-all"></span> Player Identity
+                </p>
+                <div className="flex gap-4 items-center w-full">
+                  <div className="relative group shrink-0 w-14 h-14 md:w-16 md:h-16 rounded-2xl border-2 border-white/10 bg-slate-900 overflow-hidden shadow-inner hover:border-blue-500/50 transition-all cursor-default">
+                     <img src={customAvatar || getAvatarUrl(avatarSeed)} alt="Avatar" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 group-hover:blur-sm" />
+                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <button onClick={(e) => { e.preventDefault(); setAvatarSeed(Math.random().toString(36).substring(2,8)); setCustomAvatar(null); }} className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" title="Randomize Avatar">
+                           <RefreshCw size={12} />
+                        </button>
+                        <label className="p-1.5 bg-blue-500/90 hover:bg-blue-400 rounded-full text-white cursor-pointer transition-colors shadow-lg" title="Upload Avatar">
+                           <Upload size={12} />
+                           <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                        </label>
+                     </div>
+                  </div>
+                  <div className="relative flex-1">
+                    <input type="text" placeholder="Enter Nickname..." value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={15}
+                      className="w-full bg-slate-950/50 border border-white/5 rounded-2xl px-5 py-4 focus:outline-none focus:border-blue-500/50 focus:bg-slate-900/80 focus:ring-2 focus:ring-blue-500/20 text-white font-bold text-lg transition-all placeholder:text-slate-600 shadow-inner"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="border-t border-white/5 my-1"></div>
+              <div className="border-t border-white/5 -mx-4"></div>
 
               <div>
-                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2 ml-2 flex items-center gap-2"><Navigation size={12}/> Join Operation</p>
+                <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.15em] mb-3 ml-1 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/50"></span> Join Operation
+                </p>
                 <div className="flex gap-2">
                   <input type="text" placeholder="CODE" value={joinCode} onChange={(e) => setJoinCode(e.target.value.substring(0,4).toUpperCase())} 
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-white font-mono font-black text-center text-xl tracking-[0.3em] uppercase shadow-inner placeholder:text-slate-600 placeholder:tracking-normal" />
+                    className="w-full bg-slate-950/50 border border-white/5 rounded-2xl px-4 py-4 focus:outline-none focus:border-emerald-500/50 focus:bg-slate-900/80 focus:ring-2 focus:ring-emerald-500/20 text-white font-mono font-black text-center text-xl tracking-[0.3em] uppercase shadow-inner placeholder:text-slate-600 placeholder:tracking-normal transition-all" />
                   <button onClick={joinRoom} disabled={!user || joinCode.length !== 4 || isJoining} 
-                    className="w-24 md:w-28 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-2xl font-bold shadow-[0_0_20px_rgba(5,150,105,0.3)] transition-all active:scale-95 text-sm md:text-base">
+                    className={`w-28 rounded-2xl font-black shadow-lg transition-all active:scale-95 text-sm md:text-base flex items-center justify-center
+                      ${joinCode.length === 4 
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:from-emerald-400 hover:to-teal-400' 
+                        : 'bg-slate-800 text-slate-500'}`}>
                     JOIN
                   </button>
                 </div>
@@ -1070,7 +995,7 @@ export default function App() {
               <div className="group shrink-0">
                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2 ml-2 group-focus-within:text-indigo-400 transition-colors">Room Name</p>
                 <input type="text" placeholder={`${playerName.trim() || 'My'} Room`} value={roomName} onChange={(e) => setRoomName(e.target.value)} maxLength={25}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white font-bold text-base transition-all placeholder:text-slate-600 shadow-inner"
+                    className="w-full bg-slate-950/50 border border-white/5 rounded-2xl px-5 py-4 focus:outline-none focus:border-indigo-500/50 focus:bg-slate-900/80 focus:ring-2 focus:ring-indigo-500/20 text-white font-bold text-base transition-all placeholder:text-slate-600 shadow-inner"
                   />
               </div>
 
@@ -1079,24 +1004,32 @@ export default function App() {
                  {/* Number of Rounds */}
                  <div>
                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2 ml-2">Number of Rounds</p>
-                   <div className="flex justify-between items-center bg-black/40 border border-white/10 rounded-2xl p-1.5 gap-1.5 shadow-inner">
-                     {[5, 10, 20, 30].map(r => (
-                       <button key={r} onClick={() => setNumRounds(r)} className={`flex-1 py-3 rounded-xl font-black text-xs sm:text-sm transition-all ${numRounds === r ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)] scale-105' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
+                   <div className="grid grid-cols-3 gap-1.5 bg-slate-950/50 border border-white/5 rounded-2xl p-1.5 shadow-inner">
+                     {[5, 10, 15, 20, 30].map(r => (
+                       <button key={r} onClick={() => setNumRounds(r)} className={`py-2.5 md:py-3 rounded-xl font-black text-xs sm:text-sm transition-all ${numRounds === r ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)] z-10 relative' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
                          {r}
                        </button>
                      ))}
+                     <div className={`relative rounded-xl transition-all flex items-center justify-center ${![5, 10, 15, 20, 30].includes(numRounds) && numRounds !== '' ? 'bg-indigo-600 shadow-[0_0_15px_rgba(79,70,229,0.4)] z-10 relative' : 'bg-black/40 hover:bg-white/5 border border-white/5'}`}>
+                        <input type="number" value={![5, 10, 15, 20, 30].includes(numRounds) ? numRounds : ''} onChange={(e) => setNumRounds(e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))} onBlur={() => !numRounds && setNumRounds(5)} placeholder="Custom" 
+                          className={`w-full bg-transparent border-none text-center font-black text-xs sm:text-sm focus:outline-none placeholder:font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${![5, 10, 15, 20, 30].includes(numRounds) && numRounds !== '' ? 'text-white placeholder:text-indigo-300' : 'text-slate-500 placeholder:text-slate-600'}`} />
+                     </div>
                    </div>
                  </div>
 
                  {/* Timer Settings */}
                  <div>
-                   <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2 ml-2">Round Timer</p>
-                   <div className="flex justify-between items-center bg-black/40 border border-white/10 rounded-2xl p-1.5 gap-1.5 shadow-inner">
-                     {[15, 30, 60, 120, 0].map(t => (
-                       <button key={t} onClick={() => setTimeLimit(t)} className={`flex-1 py-3 rounded-xl font-black text-xs sm:text-sm transition-all ${timeLimit === t ? 'bg-slate-700 text-white shadow-[0_0_15px_rgba(255,255,255,0.1)] scale-105' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
+                   <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2 ml-2">Round Timer (Sec)</p>
+                   <div className="grid grid-cols-3 gap-1.5 bg-slate-950/50 border border-white/5 rounded-2xl p-1.5 shadow-inner">
+                     {[15, 30, 45, 60, 0].map(t => (
+                       <button key={t} onClick={() => setTimeLimit(t)} className={`py-2.5 md:py-3 rounded-xl font-black text-xs sm:text-sm transition-all ${timeLimit === t ? 'bg-slate-700 text-white shadow-[0_0_15px_rgba(255,255,255,0.1)] z-10 relative' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
                          {t === 0 ? '∞' : `${t}s`}
                        </button>
                      ))}
+                     <div className={`relative rounded-xl transition-all flex items-center justify-center ${![15, 30, 45, 60, 0].includes(timeLimit) && timeLimit !== '' ? 'bg-slate-700 shadow-[0_0_15px_rgba(255,255,255,0.1)] z-10 relative' : 'bg-black/40 hover:bg-white/5 border border-white/5'}`}>
+                        <input type="number" value={![15, 30, 45, 60, 0].includes(timeLimit) ? timeLimit : ''} onChange={(e) => setTimeLimit(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))} onBlur={() => timeLimit === '' && setTimeLimit(60)} placeholder="Custom" 
+                          className={`w-full bg-transparent border-none text-center font-black text-xs sm:text-sm focus:outline-none placeholder:font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${![15, 30, 45, 60, 0].includes(timeLimit) && timeLimit !== '' ? 'text-white placeholder:text-slate-400' : 'text-slate-500 placeholder:text-slate-600'}`} />
+                     </div>
                    </div>
                  </div>
               </div>
@@ -1104,7 +1037,7 @@ export default function App() {
               {/* Map/Region Settings */}
               <div className="shrink-0">
                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2 ml-2">Select Map Area</p>
-                <div className="flex flex-col sm:flex-row bg-black/40 border border-white/10 rounded-2xl p-1.5 gap-1.5 shadow-inner">
+                <div className="flex flex-col sm:flex-row bg-slate-950/50 border border-white/5 rounded-2xl p-1.5 gap-1.5 shadow-inner">
                   <button onClick={() => setRegion('world')} className={`flex-1 py-3.5 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm ${region === 'world' ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] scale-[1.02]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
                     <Globe size={18} /> World Drop
                   </button>
@@ -1127,7 +1060,7 @@ export default function App() {
               </div>
               
               {/* Host & Advanced Settings */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-6 sm:gap-4 bg-black/40 border border-white/10 rounded-2xl p-4 md:p-6 shadow-inner shrink-0">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-6 sm:gap-4 bg-slate-950/50 border border-white/5 rounded-2xl p-4 md:p-6 shadow-inner shrink-0">
                  {/* Host Toggle */}
                  <div className="flex items-center justify-between w-full sm:w-1/2 gap-4">
                     <div className="flex flex-col">
@@ -1186,27 +1119,30 @@ export default function App() {
       <div className="min-h-screen bg-[#050B14] text-slate-100 flex flex-col items-center justify-center p-4 md:p-8 font-sans relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-900/20 via-[#050B14] to-[#050B14] pointer-events-none"></div>
         
-        {/* Expanded max-width from 4xl to 6xl to provide massive horizontal arena */}
-        <div className="w-full max-w-6xl bg-slate-900/40 backdrop-blur-2xl p-6 md:p-10 rounded-[2rem] shadow-2xl border border-white/10 relative z-10 flex flex-col md:flex-row gap-6 md:gap-10">
-          
-          {/* Quick Exit / Leave Lobby Button */}
-          <button onClick={handleExit} className="absolute top-4 left-4 md:top-6 md:left-6 bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-white/10 hover:border-red-500/50 p-2 md:p-2.5 rounded-full transition-all z-50 shadow-lg group flex items-center gap-2" title="Return to Main Menu">
-             <span className="hidden group-hover:block text-[10px] md:text-xs font-black uppercase tracking-widest px-2">Leave Room</span>
-             <Home size={18} className="md:w-5 md:h-5" />
-          </button>
+        {/* Quick Exit Button (Moved to absolute screen edge to prevent intersection) */}
+        <button onClick={handleExit} className="absolute top-4 left-4 md:top-8 md:left-8 bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-white/10 hover:border-red-500/50 p-2.5 md:p-3 rounded-full transition-all z-50 shadow-lg group flex items-center gap-2" title="Return to Main Menu">
+           <Home size={20} />
+           <span className="hidden group-hover:block text-xs font-black uppercase tracking-widest px-2">Leave Room</span>
+        </button>
 
-          {/* Code Section (Locked to 1/3 width to give playground more room) */}
-          <div className="w-full md:w-1/3 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-white/10 pb-8 md:pb-0 md:pr-10 text-center shrink-0 pt-8 md:pt-0">
-            <div className={`bg-blue-500/10 ${isSpectator ? 'text-blue-300' : 'text-blue-400'} border border-blue-500/20 px-4 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest mb-4 md:mb-6 inline-flex items-center gap-2`}>
+        <div className="w-full max-w-7xl bg-slate-900/40 backdrop-blur-3xl p-6 md:p-10 rounded-[2.5rem] shadow-2xl border border-white/10 relative z-10 flex flex-col md:flex-row gap-8 md:gap-12 mt-10 md:mt-0">
+          
+          {/* Code Section */}
+          <div className="w-full md:w-1/3 flex flex-col items-center justify-center bg-slate-950/40 rounded-[2rem] border border-white/5 p-8 shadow-inner shrink-0 text-center relative overflow-hidden">
+            <div className={`bg-blue-500/10 ${isSpectator ? 'text-blue-300' : 'text-blue-400'} border border-blue-500/20 px-4 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest mb-6 inline-flex items-center gap-2`}>
               <Sparkles size={14}/> {isSpectator ? 'Spectating Room' : 'Waiting Area'}
             </div>
             
-            <p className="text-slate-500 font-bold tracking-[0.2em] uppercase mb-1 text-xs truncate max-w-[250px]">{displayRoomName}</p>
+            <p className="text-slate-500 font-bold tracking-[0.2em] uppercase mb-2 text-xs truncate max-w-[250px]">{displayRoomName}</p>
             
-            <h2 className="text-5xl sm:text-6xl md:text-7xl font-black font-mono tracking-widest text-white drop-shadow-[0_0_40px_rgba(255,255,255,0.3)] mb-6 md:mb-8 select-all">{roomCode}</h2>
-            <div className="w-full flex bg-black/50 p-1.5 rounded-2xl border border-white/10 shadow-inner overflow-hidden">
+            {/* Monolithic Room Code */}
+            <h2 className="text-6xl md:text-7xl font-black font-mono tracking-widest text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.2)] mb-8 select-all bg-black/30 w-full py-4 rounded-2xl border border-white/5">
+              {roomCode}
+            </h2>
+
+            <div className="w-full flex bg-black/60 p-1.5 rounded-2xl border border-white/10 shadow-inner overflow-hidden">
                <input type="text" readOnly value={shareUrl} className="flex-1 bg-transparent text-slate-400 px-3 font-mono text-[10px] md:text-xs outline-none w-0" />
-               <button onClick={copyLink} className={`px-4 md:px-5 py-2 md:py-3 rounded-xl font-bold flex items-center gap-2 transition-all text-xs md:text-sm shrink-0 ${copySuccess ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+               <button onClick={copyLink} className={`px-4 md:px-5 py-2.5 md:py-3 rounded-xl font-bold flex items-center gap-2 transition-all text-xs md:text-sm shrink-0 ${copySuccess ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
                  {copySuccess ? <CheckCircle size={16} /> : <Copy size={16} />} {copySuccess ? 'Copied' : 'Copy'}
                </button>
             </div>
@@ -1228,16 +1164,15 @@ export default function App() {
             </div>
           </div>
 
-          {/* Players Section (2/3 width for massive playground) */}
+          {/* Players Section (Sleek Grid Layout) */}
           <div className="w-full md:w-2/3 flex flex-col min-h-0">
-            <h3 className="text-lg md:text-xl font-black mb-4 md:mb-6 flex items-center justify-between border-b border-white/10 pb-4 shrink-0">
+            <h3 className="text-lg md:text-xl font-black mb-3 md:mb-4 flex items-center justify-between shrink-0">
                <span className="flex items-center gap-3"><Users className="text-blue-400" /> Players Joined</span>
-               <span className="bg-blue-600 px-3 py-1 rounded-full text-xs md:text-sm">{playersList.length} / 100</span>
+               <span className="bg-blue-600 px-3 py-1 rounded-full text-xs md:text-sm shadow-[0_0_15px_rgba(37,99,235,0.5)]">{playersList.length} / 100</span>
             </h3>
             
-            {/* Interactive Physics Bouncing Avatar Container */}
-            <div className="flex-1 flex flex-col mb-2 min-h-0">
-               <BouncingAvatars players={Object.entries(roomData.players || {}).map(([id, p]) => ({ id, ...p }))} />
+            <div className="flex-1 flex flex-col mb-2 min-h-0 relative">
+               <OperativeGrid players={Object.entries(roomData.players || {}).map(([id, p]) => ({ id, ...p }))} />
             </div>
           </div>
         </div>
@@ -1263,7 +1198,7 @@ export default function App() {
     const amIInTop3 = myRankIndex < 3;
 
     return (
-      <div className="fixed inset-0 bg-black text-white font-sans flex flex-col overflow-hidden">
+      <div className="fixed inset-0 bg-black text-white font-sans flex flex-col overflow-hidden" style={{ touchAction: 'none', overscrollBehavior: 'none', height: '100dvh' }}>
         <div className="absolute inset-0 z-0 bg-[#050B14]">
           <StreetView location={currentLoc} />
           <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.8)] pointer-events-none z-10"></div>
@@ -1451,16 +1386,23 @@ export default function App() {
      const currentGuesses = roomData.guesses?.[roomData.currentRound] || {}; // SAFE GUARD
      const myGuess = currentGuesses[uid];
      const myDistance = myGuess && myGuess.distance !== null ? Math.round(myGuess.distance) : null;
-     const mapGuesses = allPlayers.map(([pid, p]) => currentGuesses[pid] ? { ...currentGuesses[pid], color: p.color, label: p.name, avatar: p.avatar } : null).filter(Boolean);
+     
+     // Filter pins based on leaderboard selection
+     const mapGuesses = allPlayers
+        .map(([pid, p]) => currentGuesses[pid] ? { ...currentGuesses[pid], color: p.color, label: p.name, avatar: p.avatar, id: pid } : null)
+        .filter(Boolean)
+        .filter(guess => focusedPlayerId ? guess.id === focusedPlayerId : true);
 
      return (
        <div className="h-[100dvh] bg-[#050B14] text-white flex flex-col overflow-hidden font-sans relative">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent pointer-events-none"></div>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-indigo-900/20 via-[#050B14] to-[#050B14] pointer-events-none"></div>
           
           <header className="px-4 py-3 md:px-6 md:py-4 border-b border-white/5 flex justify-between items-center bg-slate-900/50 backdrop-blur-xl relative z-10 shrink-0">
              <div className="flex items-center gap-3 md:gap-4">
                <button onClick={handleExit} className="bg-white/5 hover:bg-red-500/20 text-slate-300 hover:text-red-400 border border-white/10 hover:border-red-500/50 p-2 md:p-3 rounded-xl md:rounded-2xl transition-all"><Home size={18} className="md:w-5 md:h-5"/></button>
-               <h2 className="text-base md:text-2xl font-black tracking-widest uppercase">Round Analysis</h2>
+               <h2 className="text-base md:text-2xl font-black tracking-widest uppercase flex items-center gap-2">
+                  <Radar className="text-blue-500 hidden sm:block" size={24}/> Round Analysis
+               </h2>
              </div>
              {isHost ? (
                  <button onClick={nextRound} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 md:px-8 md:py-3 rounded-xl md:rounded-2xl font-bold flex items-center gap-2 md:gap-3 shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all active:scale-95 text-xs md:text-lg">
@@ -1477,43 +1419,75 @@ export default function App() {
                <div className="flex-1 flex flex-col gap-3 md:gap-5 min-h-[40vh] md:min-h-0 overflow-hidden h-full">
                   
                   {isSpectating ? (
-                     <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-4 md:p-5 rounded-2xl md:rounded-3xl border border-white/10 shadow-2xl flex items-center justify-center shrink-0">
+                     <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-4 md:p-6 rounded-[2rem] border border-white/10 shadow-2xl flex items-center justify-center shrink-0">
                         <h2 className="text-xl md:text-2xl font-black tracking-widest uppercase text-blue-400 flex items-center gap-3"><Eye size={24}/> Spectator Mode</h2>
                      </div>
                   ) : (
-                     <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-4 md:p-5 rounded-2xl md:rounded-3xl border border-white/10 shadow-2xl flex items-center justify-between shrink-0">
-                       <div>
-                         <h3 className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-[0.2em] mb-1">Impact Distance</h3>
-                         <h2 className={`text-2xl md:text-4xl font-black tracking-tighter ${myDistance !== null ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]' : 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.3)]'}`}>
+                     <div className={`bg-gradient-to-br from-slate-900 to-slate-950 p-6 md:p-8 rounded-[2rem] border border-white/5 flex items-center justify-between shrink-0 shadow-2xl transition-all
+                        ${myDistance !== null && myDistance <= 100 ? 'shadow-[0_0_40px_rgba(16,185,129,0.1)] border-emerald-500/20' : 
+                          myDistance !== null && myDistance > 5000 ? 'shadow-[0_0_40px_rgba(239,68,68,0.1)] border-red-500/20' : ''}`}>
+                       
+                       <div className="flex flex-col">
+                         <h3 className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.2em] mb-1 flex items-center gap-2">
+                           <ShieldAlert size={14} className="text-slate-500"/> Impact Distance
+                         </h3>
+                         <h2 className={`text-4xl md:text-6xl font-black tracking-tighter bg-clip-text text-transparent
+                           ${myDistance !== null && myDistance <= 500 ? 'bg-gradient-to-b from-emerald-300 to-emerald-600' : 
+                             myDistance !== null && myDistance <= 2000 ? 'bg-gradient-to-b from-yellow-300 to-yellow-600' : 
+                             myDistance !== null ? 'bg-gradient-to-b from-red-300 to-red-600' : 'text-slate-600'}`}>
                            {myDistance !== null ? `${myDistance.toLocaleString()} KM` : "SIGNAL LOST"}
                          </h2>
                        </div>
-                       {myDistance !== null && <div className="text-right">
-                         <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-[0.2em] mb-1">Points Gained</p>
-                         <p className="text-xl md:text-3xl font-black text-blue-400">+{(myGuess?.score || 0).toLocaleString()}</p>
-                       </div>}
+
+                       {myDistance !== null && (
+                         <div className="text-right flex flex-col items-end">
+                           <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.2em] mb-1 flex items-center gap-2">
+                              Points Gained <Target size={14} className="text-blue-500"/>
+                           </p>
+                           <p className="text-3xl md:text-5xl font-black bg-gradient-to-b from-blue-300 to-blue-600 bg-clip-text text-transparent">
+                             +{(myGuess?.score || 0).toLocaleString()}
+                           </p>
+                         </div>
+                       )}
                      </div>
                   )}
                   
                   {/* Fixed Map Container taking up all remaining empty space via flex-grow */}
-                  <div className="relative rounded-2xl md:rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.5)] border border-white/10 w-full flex-grow min-h-[300px] md:min-h-0 h-[40vh] md:h-auto bg-slate-900">
+                  <div className="relative rounded-[2rem] overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.5)] border border-white/10 w-full flex-grow min-h-[300px] md:min-h-0 h-[40vh] md:h-auto bg-slate-900">
                     <GoogleMapCanvas interactable={false} actualLocation={currentLoc} guesses={mapGuesses} isExpanded={true} />
                   </div>
                </div>
 
                {/* Leaderboard Panel */}
-               <div className="w-full md:w-[320px] lg:w-[400px] shrink-0 bg-slate-900/60 backdrop-blur-2xl rounded-2xl md:rounded-3xl border border-white/10 p-4 flex flex-col h-[35vh] md:h-full">
-                  <h3 className="text-[10px] md:text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2 shrink-0"><Trophy size={14} className="md:w-4 md:h-4"/> Operational Rankings</h3>
-                  <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-0">
-                    {allPlayers.sort((a,b) => (currentGuesses[b[0]]?.score || 0) - (currentGuesses[a[0]]?.score || 0)).map(([pid, p], i) => (
-                      <div key={pid} className="bg-white/5 hover:bg-white/10 transition-colors p-3 md:p-4 rounded-xl md:rounded-2xl border border-white/5 flex justify-between items-center group">
+               <div className="w-full md:w-[320px] lg:w-[400px] shrink-0 bg-slate-900/60 backdrop-blur-3xl rounded-[2rem] border border-white/10 p-5 flex flex-col h-[35vh] md:h-full shadow-2xl">
+                  <h3 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2 shrink-0 pb-3 border-b border-white/5">
+                    <Trophy size={14} className="text-yellow-500"/> Operational Rankings
+                    {focusedPlayerId && <span className="ml-auto text-[8px] md:text-[9px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full animate-pulse">Filtering Map</span>}
+                  </h3>
+                  <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar px-2 -mx-2 py-2 min-h-0">
+                    {allPlayers.sort((a,b) => (currentGuesses[b[0]]?.score || 0) - (currentGuesses[a[0]]?.score || 0)).map(([pid, p], i) => {
+                      const isFocused = focusedPlayerId === pid;
+                      const isOtherFocused = focusedPlayerId && !isFocused;
+
+                      return (
+                      <div key={pid} 
+                           onClick={() => setFocusedPlayerId(isFocused ? null : pid)}
+                           className={`p-3 md:p-4 rounded-2xl border flex justify-between items-center group cursor-pointer transition-all duration-300 transform relative
+                        ${uid === pid ? 'border-blue-500/30 bg-blue-900/10' : 'border-white/5 bg-slate-950/50'}
+                        ${isFocused ? 'ring-2 ring-inset ring-blue-500 scale-[1.02] shadow-[0_0_20px_rgba(59,130,246,0.3)] z-10' : ''}
+                        ${isOtherFocused ? 'opacity-40 hover:opacity-100' : 'hover:bg-slate-800'}`}>
+                         
                          <div className="flex items-center gap-3 w-full min-w-0">
-                            <span className="text-xs md:text-sm font-black text-slate-600 w-4 text-center shrink-0">{i+1}</span>
-                            <img src={p.avatar} alt="av" className="w-8 h-8 md:w-10 md:h-10 rounded-full border-2 bg-slate-900 shadow-lg shrink-0" style={{ borderColor: p.color }} />
+                            <span className={`text-xs md:text-sm font-black w-5 text-center shrink-0 ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-slate-300' : i === 2 ? 'text-amber-600' : 'text-slate-600'}`}>
+                              {i+1}
+                            </span>
+                            <img src={p.avatar} alt="av" className="w-8 h-8 md:w-10 md:h-10 rounded-full border-2 bg-slate-900 shadow-lg shrink-0 object-cover" style={{ borderColor: p.color }} />
                             <div className="flex flex-col flex-1 min-w-0">
-                               <span className="font-bold text-white text-sm md:text-base tracking-wide truncate">{p.name}</span>
+                               <span className={`font-bold text-sm md:text-base tracking-wide truncate ${uid === pid ? 'text-blue-400' : 'text-white'}`}>
+                                 {uid === pid ? 'You' : p.name}
+                               </span>
                                <span className="text-[9px] md:text-[10px] font-mono font-bold tracking-widest text-slate-500 truncate mt-0.5">
-                                 {currentGuesses[pid]?.distance ? `${Math.round(currentGuesses[pid].distance).toLocaleString()} KM` : 'M.I.A.'}
+                                 {currentGuesses[pid]?.distance !== undefined && currentGuesses[pid]?.distance !== null ? `${Math.round(currentGuesses[pid].distance).toLocaleString()} KM` : 'M.I.A.'}
                                </span>
                             </div>
                          </div>
@@ -1521,7 +1495,7 @@ export default function App() {
                             <span className="text-base md:text-xl font-black text-emerald-400">+{(currentGuesses[pid]?.score || 0).toLocaleString()}</span>
                          </div>
                       </div>
-                    ))}
+                    )})}
                   </div>
                </div>
              </div>
