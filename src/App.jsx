@@ -653,7 +653,15 @@ export default function App() {
       } else {
         const data = snap.data();
         const finalName = playerName.trim() || 'Operative';
-        await updateDoc(roomRef, { [`players.${user.uid}`]: { name: finalName.substring(0, 15), avatar: customAvatar || getAvatarUrl(avatarSeed), score: 0, color: getPlayerColor(Object.keys(data.players || {}).length, 8) } });
+        
+        // RECONNECTION SYSTEM: Preserve existing score and color if the player is rejoining!
+        const existingPlayer = data.players?.[user.uid];
+        const newPlayerData = existingPlayer 
+            ? { ...existingPlayer, name: finalName.substring(0, 15), avatar: customAvatar || getAvatarUrl(avatarSeed) } 
+            : { name: finalName.substring(0, 15), avatar: customAvatar || getAvatarUrl(avatarSeed), score: 0, color: getPlayerColor(Object.keys(data.players || {}).length, 8) };
+            
+        await updateDoc(roomRef, { [`players.${user.uid}`]: newPlayerData });
+        
         setRoomCode(codeToJoin);
         setInviteCode(''); 
         setView('lobby');
@@ -734,6 +742,14 @@ export default function App() {
     // Clock keeps ticking visually down below
     const finalGuess = guessOverride || activeGuess;
     if (!user || !roomData) return;
+
+    const uid = isSinglePlayer ? Object.keys(roomData.players || {})[0] : user?.uid;
+    
+    // ANTI-CHEAT: Prevent overwriting an already locked guess by refreshing the page
+    if (!isSinglePlayer && roomData.guesses?.[roomData.currentRound]?.[uid]) {
+        return; 
+    }
+
     if (!finalGuess && !isTimeout) return; 
 
     const actualLoc = roomData.locations?.[roomData.currentRound] || { lat: 0, lng: 0 }; // SAFE GUARD
@@ -742,7 +758,6 @@ export default function App() {
     const mapSizeKm = getMapSize(roomData.settings?.region, roomData.settings?.customLocations);
     const score = finalGuess ? calculateScore(distance, mapSizeKm) : 0;
     
-    const uid = isSinglePlayer ? Object.keys(roomData.players || {})[0] : user?.uid;
     const guessData = finalGuess ? { ...finalGuess, distance, score } : { lat: null, lng: null, distance, score, timeout: true };
 
     setMatchHistory(prev => [...prev, {
@@ -766,10 +781,11 @@ export default function App() {
   const nextRound = async () => {
     const isGameOver = roomData.currentRound + 1 >= (roomData.settings?.numRounds || 5);
     if (isSinglePlayer) {
-      setRoomData(prev => ({ ...prev, status: isGameOver ? 'game_over' : 'playing', currentRound: prev.currentRound + 1 }));
-      setView(isGameOver ? 'game_over' : 'playing');
+      setRoomData(prev => ({ ...prev, status: isGameOver ? 'game_over' : 'starting', currentRound: prev.currentRound + 1 }));
+      setView(isGameOver ? 'game_over' : 'starting');
+      if (!isGameOver) setStartCountdown(3);
     } else {
-      await updateDoc(getRoomRef(roomCode), { status: isGameOver ? 'game_over' : 'playing', currentRound: roomData.currentRound + 1 });
+      await updateDoc(getRoomRef(roomCode), { status: isGameOver ? 'game_over' : 'starting', currentRound: roomData.currentRound + 1 });
     }
     setActiveGuess(null);
     setIsMapExpanded(false);
@@ -1338,9 +1354,10 @@ export default function App() {
         {/* Top Left HUD - Made Smaller & Controlled by hideUI */}
         <div className={`absolute top-4 md:top-6 left-4 md:left-6 z-20 pointer-events-none flex flex-col items-start gap-2 transition-opacity duration-300 ${hideUI ? 'opacity-0' : 'opacity-100'}`}>
            <div className="flex items-center gap-2 md:gap-3 pointer-events-auto">
-             {/* Quick Exit / Abort Match Button */}
-             <button onClick={handleExit} className="bg-black/60 backdrop-blur-xl border border-white/10 hover:border-red-500/50 hover:bg-red-500/20 text-slate-300 hover:text-red-400 p-2 md:p-3 rounded-xl md:rounded-2xl transition-all shadow-2xl flex items-center justify-center" title="Quit Operation">
+             {/* Quick Exit / Abort Match Button (Made more obvious) */}
+             <button onClick={handleExit} className="bg-red-500/20 backdrop-blur-xl border border-red-500/50 hover:bg-red-500/40 text-red-200 hover:text-white p-2 md:p-3 rounded-xl md:rounded-2xl transition-all shadow-2xl flex items-center justify-center gap-2 group" title="Quit Operation">
                <Home size={16} className="md:w-5 md:h-5" />
+               <span className="text-[10px] md:text-xs font-black uppercase tracking-widest hidden sm:block group-hover:block pr-1">Flee</span>
              </button>
              
              {/* Round Info Pill */}
